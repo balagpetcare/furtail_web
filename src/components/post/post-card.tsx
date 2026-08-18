@@ -233,7 +233,7 @@ export function PostCard({ post }: PostCardProps) {
           <>
             {post.caption && (
               <ClickableRegion onActivate={() => openSinglePost()} ariaLabel="Open post">
-                <CaptionText text={post.caption} />
+                <CaptionText text={post.caption} backgroundStyle={post.backgroundStyle} />
               </ClickableRegion>
             )}
             <MediaGrid media={post.media} onOpen={openSinglePost} />

@@ -181,7 +181,7 @@ export default function SinglePostPage() {
                   </div>
                 </div>
               ) : (
-                post.caption && <CaptionText text={post.caption} />
+                post.caption && <CaptionText text={post.caption} backgroundStyle={post.backgroundStyle} />
               )}
 
               {/* Small-screen media (large-screen media is the sticky left column above) */}

@@ -8,6 +8,7 @@ export interface TaxonomyOption {
   emoji?: string;
   category?: string;
   colorValue?: string | null;
+  textColor?: string | null;
   sortOrder: number;
   isActive: boolean;
 }

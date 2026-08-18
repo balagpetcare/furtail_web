@@ -51,6 +51,7 @@ import { BackgroundStylesScroller } from "@/components/post/background-styles-sc
 import { CreatePostMetadataRow } from "@/components/post/create-post-metadata-row";
 import { MediaActionBar } from "@/components/post/media-action-bar";
 import { MediaPreviewGrid } from "@/components/post/media-preview-grid";
+import { CaptionEditorWithPreview } from "@/components/post/caption-editor-with-preview";
 import { toast } from "sonner";
 
 interface CreatePostModalProps {
@@ -213,10 +214,18 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
         };
       });
 
-      setDraft((prev) => ({
-        ...prev,
-        media: [...prev.media, ...newItems],
-      }));
+      setDraft((prev) => {
+        // Clear background when media is added (text posts with backgrounds + media don't mix)
+        const shouldClearBackground = prev.backgroundStyle && prev.media.length === 0;
+        if (shouldClearBackground) {
+          toast("Background style cleared (media posts can't have backgrounds)");
+        }
+        return {
+          ...prev,
+          media: [...prev.media, ...newItems],
+          backgroundStyle: shouldClearBackground ? undefined : prev.backgroundStyle,
+        };
+      });
 
       // Upload each file sequentially
       for (let i = 0; i < fileArray.length; i++) {
@@ -443,27 +452,21 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
             {/* Metadata Action Row */}
             <CreatePostMetadataRow draft={draft} />
 
-            {/* Caption Editor - Auto-grow */}
-            <textarea
-              value={draft.caption}
-              onChange={(e) => {
-                setDraft((prev) => ({ ...prev, caption: e.target.value }));
-                // Auto-grow behavior
-                const textarea = e.target;
-                textarea.style.height = 'auto';
-                textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
-              }}
-              onInput={(e) => {
-                const textarea = e.currentTarget;
-                textarea.style.height = 'auto';
-                textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
-              }}
-              placeholder="What's happening in your pet world?"
-              rows={1}
-              className="w-full bg-transparent resize-none outline-none text-gray-800 placeholder-gray-400 text-base focus:ring-0 mb-3 min-h-[52px]"
-              disabled={mutation.isPending}
-              style={{ overflow: 'hidden', height: 'auto' }}
-            />
+            {/* Caption Editor with Background Preview */}
+            <div className="mb-3">
+              <CaptionEditorWithPreview
+                value={draft.caption}
+                onChange={(value) => {
+                  setDraft((prev) => ({ ...prev, caption: value }));
+                }}
+                selectedBackgroundStyle={
+                  draft.backgroundStyle
+                    ? backgroundStylesQuery.data?.data?.find((s) => s.key === draft.backgroundStyle)
+                    : undefined
+                }
+                isDisabled={mutation.isPending}
+              />
+            </div>
 
             {/* Media Preview Grid - Professional Layout */}
             <MediaPreviewGrid
