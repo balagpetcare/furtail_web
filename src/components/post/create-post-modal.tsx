@@ -32,13 +32,22 @@ import { getMediaUrl } from "@/lib/media";
 import { authKeys, authApi } from "@/lib/api/auth";
 import { postsApi, postsKeys } from "@/lib/api/posts";
 import { petsApi, petsKeys } from "@/lib/api/pets";
-import { taxonomyApi } from "@/lib/api/taxonomy";
+import {
+  useFeelings,
+  useActivities,
+  usePostCategories,
+  useContentTags,
+  useBackgroundStyles,
+  type TaxonomyOption,
+} from "@/lib/api/taxonomies";
 import {
   CreatePostDraft,
   DEFAULT_DRAFT,
   MediaItem,
   draftToCreatePostInput,
 } from "@/lib/create-post-draft";
+import { PopoverPicker, SelectedChip } from "@/components/ui/popover-picker";
+import { BackgroundStylesScroller } from "@/components/post/background-styles-scroller";
 import { toast } from "sonner";
 
 interface CreatePostModalProps {
@@ -52,6 +61,7 @@ const PRIVACY_OPTIONS = [
   { value: "PRIVATE", label: "Private", icon: Lock, description: "Only you" },
 ] as const;
 
+// Canonical post types - stable domain invariants
 const POST_TYPES = [
   { value: "GENERAL", label: "General" },
   { value: "HEALTH_UPDATE", label: "Health Update" },
@@ -59,16 +69,6 @@ const POST_TYPES = [
   { value: "LOST_PET", label: "Lost Pet Alert" },
   { value: "ADOPTION", label: "Adoption" },
   { value: "SERVICE_REVIEW", label: "Service Review" },
-];
-
-// Canonical background style IDs matching Flutter's PostBackgroundStyle presets
-const BACKGROUND_STYLES = [
-  { value: "none", label: "Normal", color: "bg-white" },
-  { value: "orange_red", label: "Sunset Orange", color: "bg-gradient-to-br from-orange-500 to-red-500" },
-  { value: "blue_purple", label: "Neon Blue", color: "bg-gradient-to-br from-blue-400 to-blue-600" },
-  { value: "dark_purple", label: "Deep Purple", color: "bg-gradient-to-br from-purple-600 to-orange-400" },
-  { value: "green_teal", label: "Ocean Breeze", color: "bg-gradient-to-br from-teal-500 to-green-400" },
-  { value: "midnight", label: "Midnight", color: "bg-gradient-to-br from-gray-800 to-gray-600" },
 ];
 
 async function uploadPostMedia(
@@ -140,11 +140,12 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
     enabled: open,
   });
 
-  const { data: feelingActivities } = useQuery({
-    queryKey: ["feeling-activities"],
-    queryFn: () => taxonomyApi.getFeelingActivities(),
-    enabled: open,
-  });
+  // Dynamic taxonomy hooks
+  const feelingsQuery = useFeelings();
+  const activitiesQuery = useActivities();
+  const categoriesQuery = usePostCategories();
+  const tagsQuery = useContentTags();
+  const backgroundStylesQuery = useBackgroundStyles();
 
   const mutation = useMutation({
     mutationFn: async () => {
