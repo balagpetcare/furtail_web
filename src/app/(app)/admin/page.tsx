@@ -1,9 +1,37 @@
 'use client';
 
 import Link from 'next/link';
-import { Palette, ChevronRight } from 'lucide-react';
+import { Palette, ChevronRight, SmileIcon, Zap, Grid3x3, Hash } from 'lucide-react';
 
 const ADMIN_SECTIONS = [
+  {
+    id: 'feelings',
+    title: 'Feelings',
+    description: 'Manage the Feeling options available in Create Post',
+    href: '/admin/feelings',
+    icon: SmileIcon,
+  },
+  {
+    id: 'activities',
+    title: 'Activities',
+    description: 'Manage the Activity options available in Create Post',
+    href: '/admin/activities',
+    icon: Zap,
+  },
+  {
+    id: 'categories',
+    title: 'Categories',
+    description: 'Manage the Post Category taxonomy',
+    href: '/admin/categories',
+    icon: Grid3x3,
+  },
+  {
+    id: 'tags',
+    title: 'Content Tags',
+    description: 'Manage Content Tags selectable when creating a post',
+    href: '/admin/tags',
+    icon: Hash,
+  },
   {
     id: 'background-styles',
     title: 'Background Styles',

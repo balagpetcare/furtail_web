@@ -7,7 +7,11 @@ export interface TaxonomyOption {
   label: string;
   emoji?: string;
   category?: string;
+  /** SOLID | GRADIENT | PATTERN — background styles only. */
+  styleType?: string | null;
   colorValue?: string | null;
+  /** Gradient end stop — present only when styleType === 'gradient'. */
+  colorValueEnd?: string | null;
   textColor?: string | null;
   sortOrder: number;
   isActive: boolean;

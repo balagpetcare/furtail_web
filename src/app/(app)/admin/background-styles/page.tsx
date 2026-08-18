@@ -25,6 +25,7 @@ export default function AdminBackgroundStylesPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [formData, setFormData] = useState<CreateBackgroundStyleInput>({
+    key: '',
     label: '',
     colorValue: '#f3f4f6',
     textColor: '#1f2937',
@@ -35,6 +36,10 @@ export default function AdminBackgroundStylesPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (!editingId && !formData.key.trim()) {
+      toast.error('A stable key is required');
+      return;
+    }
     if (!formData.label.trim() || !formData.colorValue || !formData.textColor) {
       toast.error('Please fill in all fields');
       return;
@@ -46,7 +51,9 @@ export default function AdminBackgroundStylesPage() {
           id: editingId,
           input: {
             label: formData.label,
+            styleType: formData.styleType,
             colorValue: formData.colorValue,
+            colorValueEnd: formData.colorValueEnd,
             textColor: formData.textColor,
             sortOrder: formData.sortOrder,
           },
@@ -60,7 +67,7 @@ export default function AdminBackgroundStylesPage() {
       queryClient.invalidateQueries({ queryKey: ['admin', 'taxonomies', 'background-styles'] });
       setShowForm(false);
       setEditingId(null);
-      setFormData({ label: '', colorValue: '#f3f4f6', textColor: '#1f2937' });
+      setFormData({ key: '', label: '', colorValue: '#f3f4f6', textColor: '#1f2937' });
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to save background style';
       toast.error(errorMessage);
@@ -69,8 +76,11 @@ export default function AdminBackgroundStylesPage() {
 
   const handleEdit = (style: TaxonomyOption) => {
     setFormData({
+      key: style.key,
       label: style.label,
+      styleType: (style.styleType as CreateBackgroundStyleInput['styleType']) ?? 'solid',
       colorValue: style.colorValue || '#f3f4f6',
+      colorValueEnd: style.colorValueEnd || undefined,
       textColor: style.textColor || '#1f2937',
       sortOrder: style.sortOrder,
     });
@@ -118,7 +128,7 @@ export default function AdminBackgroundStylesPage() {
           onClick={() => {
             setShowForm(true);
             setEditingId(null);
-            setFormData({ label: '', colorValue: '#f3f4f6', textColor: '#1f2937' });
+            setFormData({ key: '', label: '', colorValue: '#f3f4f6', textColor: '#1f2937' });
           }}
           className="mb-6"
         >
@@ -148,6 +158,23 @@ export default function AdminBackgroundStylesPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
+                Stable Key {editingId && <span className="text-gray-400 font-normal">(cannot be changed)</span>}
+              </label>
+              <Input
+                type="text"
+                value={formData.key}
+                onChange={(e) => setFormData({ ...formData, key: e.target.value })}
+                placeholder="e.g., sunset_orange"
+                disabled={Boolean(editingId)}
+                className="w-full disabled:bg-gray-100 disabled:text-gray-500"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Referenced by existing posts and the Flutter app — never reuse a deleted key.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
                 Label
               </label>
               <Input
@@ -159,27 +186,67 @@ export default function AdminBackgroundStylesPage() {
               />
             </div>
 
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Style Type</label>
+              <select
+                value={formData.styleType ?? 'solid'}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    styleType: e.target.value as CreateBackgroundStyleInput['styleType'],
+                  })
+                }
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+              >
+                <option value="solid">Solid</option>
+                <option value="gradient">Gradient</option>
+              </select>
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Background Color
+                  {formData.styleType === 'gradient' ? 'Gradient Start Color' : 'Background Color'}
                 </label>
                 <div className="flex gap-2">
                   <Input
                     type="color"
-                    value={formData.colorValue}
+                    value={formData.colorValue || '#f3f4f6'}
                     onChange={(e) => setFormData({ ...formData, colorValue: e.target.value })}
                     className="w-16 h-10 cursor-pointer"
                   />
                   <Input
                     type="text"
-                    value={formData.colorValue}
+                    value={formData.colorValue || ''}
                     onChange={(e) => setFormData({ ...formData, colorValue: e.target.value })}
                     placeholder="#ffffff"
                     className="flex-1"
                   />
                 </div>
               </div>
+
+              {formData.styleType === 'gradient' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Gradient End Color
+                  </label>
+                  <div className="flex gap-2">
+                    <Input
+                      type="color"
+                      value={formData.colorValueEnd || '#f3f4f6'}
+                      onChange={(e) => setFormData({ ...formData, colorValueEnd: e.target.value })}
+                      className="w-16 h-10 cursor-pointer"
+                    />
+                    <Input
+                      type="text"
+                      value={formData.colorValueEnd || ''}
+                      onChange={(e) => setFormData({ ...formData, colorValueEnd: e.target.value })}
+                      placeholder="#ffffff"
+                      className="flex-1"
+                    />
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -209,7 +276,10 @@ export default function AdminBackgroundStylesPage() {
               <div
                 className="p-6 rounded-lg text-center text-sm font-medium"
                 style={{
-                  backgroundColor: formData.colorValue,
+                  background:
+                    formData.styleType === 'gradient' && formData.colorValueEnd
+                      ? `linear-gradient(135deg, ${formData.colorValue}, ${formData.colorValueEnd})`
+                      : formData.colorValue || undefined,
                   color: formData.textColor,
                 }}
               >
@@ -271,7 +341,10 @@ export default function AdminBackgroundStylesPage() {
                 <div
                   className="w-16 h-16 rounded-lg flex-shrink-0 border border-gray-300"
                   style={{
-                    backgroundColor: style.colorValue || '#f3f4f6',
+                    background:
+                      style.styleType === 'gradient' && style.colorValueEnd
+                        ? `linear-gradient(135deg, ${style.colorValue}, ${style.colorValueEnd})`
+                        : style.colorValue || '#f3f4f6',
                   }}
                   title={`Text color: ${style.textColor || '#1f2937'}`}
                 >

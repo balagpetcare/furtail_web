@@ -107,6 +107,26 @@ describe("draftToCreatePostInput", () => {
     assert.strictEqual(input.mediaIds, undefined);
   });
 
+  it("preserves content tag IDs", () => {
+    const draft = {
+      ...DEFAULT_DRAFT,
+      caption: "Tagged post",
+      contentTagIds: [5, 7],
+    };
+
+    const input = draftToCreatePostInput(draft);
+
+    assert.deepStrictEqual(input.contentTagIds, [5, 7]);
+  });
+
+  it("omits contentTagIds when none are selected", () => {
+    const draft = { ...DEFAULT_DRAFT, caption: "No tags" };
+
+    const input = draftToCreatePostInput(draft);
+
+    assert.strictEqual(input.contentTagIds, undefined);
+  });
+
   it("preserves tagged pet IDs", () => {
     const draft = {
       ...DEFAULT_DRAFT,

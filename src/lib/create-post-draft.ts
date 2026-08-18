@@ -38,6 +38,10 @@ export interface CreatePostDraft {
   activityLabel?: string;
   activityEmoji?: string;
   taggedPetIds: number[];
+  /** ContentTag primary key ids — not yet exposed in the composer UI (see
+   * CreatePostMetadataRow's placeholder "Tags" action); this field exists so
+   * the payload adapter is ready for that wiring. */
+  contentTagIds: number[];
   lostPetName?: string;
   lostPetLocation?: string;
   lostPetContactVisible: boolean;
@@ -53,6 +57,7 @@ export const DEFAULT_DRAFT: CreatePostDraft = {
   postType: "GENERAL",
   media: [],
   taggedPetIds: [],
+  contentTagIds: [],
   lostPetContactVisible: false,
 };
 
@@ -81,6 +86,7 @@ export function draftToCreatePostInput(draft: CreatePostDraft): CreatePostInput 
     lostPetLocation: draft.lostPetLocation || undefined,
     lostPetContactVisible: draft.lostPetContactVisible,
     taggedPetIds: draft.taggedPetIds.length > 0 ? draft.taggedPetIds : undefined,
+    contentTagIds: draft.contentTagIds.length > 0 ? draft.contentTagIds : undefined,
     songTitle: draft.songTitle || undefined,
     songArtist: draft.songArtist || undefined,
     songStartMs: draft.songStartMs || undefined,

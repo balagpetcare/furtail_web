@@ -11,6 +11,10 @@ export const usersKeys = {
 export interface SharedProfilePayload {
   id: number;
   publicId: string;
+  /** Only ever populated on the caller's own /user/me lookup (never another
+   * user's profile) — see the backend route comment. Used for client-side
+   * admin route guarding; real enforcement is server-side. */
+  roles?: string[];
   auth: { email: string; phone: string | null };
   profile: {
     displayName: string;

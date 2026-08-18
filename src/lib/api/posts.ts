@@ -80,6 +80,7 @@ export interface Post {
   activityLabel?: string;
   activityEmoji?: string;
   taggedPets?: Array<{ id: number; name: string }>;
+  contentTags?: Array<{ id: number; key: string; label: string }>;
   lostPetName?: string;
   lostPetLocation?: string;
   lostPetContactVisible?: boolean;
@@ -101,6 +102,9 @@ export interface CreatePostInput {
   lostPetLocation?: string | null;
   lostPetContactVisible?: boolean;
   taggedPetIds?: number[];
+  /** ContentTag primary key ids (not keys) — see PostContentTag in the
+   * backend schema. */
+  contentTagIds?: number[];
   songTitle?: string | null;
   songArtist?: string | null;
   songStartMs?: number | null;
