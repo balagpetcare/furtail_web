@@ -170,10 +170,17 @@ export const postsApi = {
     return fetchApi<any>(`/posts/${id}`).then(normalizePost);
   },
 
-  createPost: async (data: { caption: string; mediaIds?: number[] }) => {
+  createPost: async (data: { caption: string; mediaIds?: number[]; idempotencyKey?: string }) => {
+    const { idempotencyKey, ...body } = data;
     return fetchApi<any>("/posts", {
       method: "POST",
-      body: data,
+      body,
+      // Ownership of this key belongs to the composer (create-post-modal),
+      // not fetchApi's generic per-call fallback — the same logical
+      // submission (initial attempt, retry) must reuse the same key, which
+      // fetchApi's own crypto.randomUUID() default can't guarantee since it
+      // mints a fresh one on every invocation.
+      headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
     }).then(normalizePost);
   },
 

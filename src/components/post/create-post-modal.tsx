@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -37,6 +37,16 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
+  // Owns the Create Post idempotency key for the current draft: generated
+  // lazily on first submit, reused across retries of that same draft
+  // (deliberately not cleared on error), and reset only when a post
+  // actually succeeds or the composer is reopened for a new draft — a
+  // genuinely new post gets a new key, a retry of the same one does not.
+  const idempotencyKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (open) idempotencyKeyRef.current = null;
+  }, [open]);
 
   const { data: user } = useQuery({
     queryKey: authKeys.me,
@@ -44,12 +54,18 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
   });
 
   const mutation = useMutation({
-    mutationFn: (caption: string) =>
-      postsApi.createPost({
+    mutationFn: (caption: string) => {
+      if (!idempotencyKeyRef.current) {
+        idempotencyKeyRef.current = crypto.randomUUID();
+      }
+      return postsApi.createPost({
         caption,
         mediaIds: attachments.length ? attachments.map((a) => a.id) : undefined,
-      }),
+        idempotencyKey: idempotencyKeyRef.current,
+      });
+    },
     onSuccess: () => {
+      idempotencyKeyRef.current = null;
       setContent("");
       setAttachments([]);
       onOpenChange(false);
@@ -57,6 +73,8 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
       queryClient.invalidateQueries({ queryKey: postsKeys.all });
     },
     onError: () => {
+      // Deliberately do not clear idempotencyKeyRef — a user-triggered
+      // retry of this same draft must reuse the same key.
       toast.error("Failed to create post. Please try again.");
     },
   });
