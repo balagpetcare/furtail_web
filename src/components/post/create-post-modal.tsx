@@ -48,6 +48,7 @@ import {
 } from "@/lib/create-post-draft";
 import { PopoverPicker, SelectedChip } from "@/components/ui/popover-picker";
 import { BackgroundStylesScroller } from "@/components/post/background-styles-scroller";
+import { CreatePostMetadataRow } from "@/components/post/create-post-metadata-row";
 import { toast } from "sonner";
 
 interface CreatePostModalProps {
@@ -383,7 +384,7 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
 
           <div className="overflow-y-auto flex-1 px-5 py-4">
             {/* Author Section */}
-            <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-center gap-3 mb-3">
               <Avatar className="w-10 h-10 border border-gray-100">
                 <AvatarImage src={getMediaUrl(avatarUrl)} alt="Avatar" />
                 <AvatarFallback className="bg-purple-50 text-purple-700 font-semibold">
@@ -437,16 +438,29 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
               </div>
             </div>
 
-            {/* Caption Editor */}
+            {/* Metadata Action Row */}
+            <CreatePostMetadataRow draft={draft} />
+
+            {/* Caption Editor - Auto-grow */}
             <textarea
               value={draft.caption}
               onChange={(e) => {
                 setDraft((prev) => ({ ...prev, caption: e.target.value }));
+                // Auto-grow behavior
+                const textarea = e.target;
+                textarea.style.height = 'auto';
+                textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
+              }}
+              onInput={(e) => {
+                const textarea = e.currentTarget;
+                textarea.style.height = 'auto';
+                textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
               }}
               placeholder="What's happening in your pet world?"
-              rows={5}
-              className="w-full bg-transparent resize-none outline-none text-gray-800 placeholder-gray-400 text-base focus:ring-0 mb-4"
+              rows={1}
+              className="w-full bg-transparent resize-none outline-none text-gray-800 placeholder-gray-400 text-base focus:ring-0 mb-3 min-h-[52px]"
               disabled={mutation.isPending}
+              style={{ overflow: 'hidden', height: 'auto' }}
             />
 
             {/* Media Preview Grid */}
@@ -529,42 +543,6 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
                 </div>
               </div>
             )}
-
-            {/* Post Type Selector */}
-            <div className="mb-4">
-              <label className="text-xs font-semibold text-gray-600 mb-2 block">
-                Post Type
-              </label>
-              <Popover>
-                <PopoverTrigger className="w-full flex items-center justify-between px-3 py-2 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">
-                    <span className="text-sm text-gray-700">
-                      {POST_TYPES.find((t) => t.value === draft.postType)
-                        ?.label || "General"}
-                    </span>
-                    <ChevronDown className="w-4 h-4 text-gray-500" />
-                </PopoverTrigger>
-                <PopoverContent className="w-full p-2" align="start">
-                  {POST_TYPES.map((type) => (
-                    <button
-                      key={type.value}
-                      onClick={() => {
-                        setDraft((prev) => ({
-                          ...prev,
-                          postType: type.value,
-                        }));
-                      }}
-                      className={`w-full text-left px-3 py-2 rounded-lg mb-1 transition-colors text-sm ${
-                        draft.postType === type.value
-                          ? "bg-purple-100 text-purple-900 font-medium"
-                          : "hover:bg-gray-100"
-                      }`}
-                    >
-                      {type.label}
-                    </button>
-                  ))}
-                </PopoverContent>
-              </Popover>
-            </div>
 
             {/* Lost Pet Conditional Fields */}
             {draft.postType === "LOST_PET" && (
