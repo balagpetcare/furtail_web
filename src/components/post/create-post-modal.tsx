@@ -112,12 +112,21 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
   const queryClient = useQueryClient();
   const idempotencyKeyRef = useRef<string | null>(null);
   const clientMediaIdRef = useRef(0);
+  const fileMapRef = useRef<Map<number, File>>(new Map()); // Store File objects for retry
 
   useEffect(() => {
     if (open) {
       idempotencyKeyRef.current = null;
     }
-  }, [open]);
+    return () => {
+      // Cleanup object URLs when component unmounts or modal closes
+      draft.media.forEach((media) => {
+        if (media.url?.startsWith("blob:")) {
+          URL.revokeObjectURL(media.url);
+        }
+      });
+    };
+  }, [open, draft.media]);
 
   const { data: user } = useQuery({
     queryKey: authKeys.me,
@@ -152,6 +161,14 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
     },
     onSuccess: () => {
       idempotencyKeyRef.current = null;
+      // Cleanup file map on success
+      fileMapRef.current.clear();
+      // Cleanup object URLs
+      draft.media.forEach((media) => {
+        if (media.url?.startsWith("blob:")) {
+          URL.revokeObjectURL(media.url);
+        }
+      });
       setDraft(DEFAULT_DRAFT);
       onOpenChange(false);
       toast.success("Post created successfully!");
@@ -180,13 +197,17 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
       const fileArray = Array.from(files);
 
       // Add local items immediately with LOCAL status
-      const newItems: MediaItem[] = fileArray.map((file) => ({
-        id: ++clientMediaIdRef.current, // Temporary client ID
-        url: URL.createObjectURL(file),
-        type: detectMediaType(file.type),
-        status: "LOCAL" as const,
-        order: draft.media.length + fileArray.indexOf(file),
-      }));
+      const newItems: MediaItem[] = fileArray.map((file) => {
+        const clientId = ++clientMediaIdRef.current;
+        fileMapRef.current.set(clientId, file); // Store File for retry
+        return {
+          id: clientId,
+          url: URL.createObjectURL(file),
+          type: detectMediaType(file.type),
+          status: "LOCAL" as const,
+          order: draft.media.length + fileArray.indexOf(file),
+        };
+      });
 
       setDraft((prev) => ({
         ...prev,
@@ -250,8 +271,9 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
   );
 
   const handleRetryMedia = useCallback(
-    async (clientId: number, file?: File) => {
+    async (clientId: number) => {
       const failedItem = draft.media.find((m) => m.id === clientId);
+      const file = fileMapRef.current.get(clientId);
       if (!failedItem || !file) return;
 
       try {
@@ -298,10 +320,19 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
   );
 
   const handleRemoveMedia = useCallback((id: number) => {
-    setDraft((prev) => ({
-      ...prev,
-      media: prev.media.filter((m) => m.id !== id),
-    }));
+    setDraft((prev) => {
+      const itemToRemove = prev.media.find((m) => m.id === id);
+      // Cleanup blob URL when removing
+      if (itemToRemove?.url?.startsWith("blob:")) {
+        URL.revokeObjectURL(itemToRemove.url);
+      }
+      // Cleanup file reference
+      fileMapRef.current.delete(id);
+      return {
+        ...prev,
+        media: prev.media.filter((m) => m.id !== id),
+      };
+    });
   }, []);
 
   const hasFailedMedia = draft.media.some((m) => m.status === "FAILED");
@@ -452,20 +483,25 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
 
                       {/* Failed state */}
                       {media.status === "FAILED" && (
-                        <div className="absolute inset-0 bg-red-500/70 flex flex-col items-center justify-center gap-2">
+                        <div className="absolute inset-0 bg-red-500/70 flex flex-col items-center justify-center gap-1 p-2">
                           <X className="w-5 h-5 text-white" />
-                          <span className="text-xs text-white font-medium text-center px-1">
-                            Failed
-                          </span>
-                          <button
-                            onClick={() => {
-                              // Retry functionality would go here
-                              // For now, just allow removing failed items
-                            }}
-                            className="text-[10px] bg-white/20 hover:bg-white/30 text-white px-2 py-1 rounded mt-1 transition-colors"
-                          >
-                            Remove
-                          </button>
+                          <span className="text-[10px] text-white font-medium text-center">Failed</span>
+                          <div className="flex gap-1 mt-1">
+                            <button
+                              onClick={() => handleRetryMedia(media.id)}
+                              className="text-[9px] bg-white/30 hover:bg-white/50 text-white px-1.5 py-0.5 rounded transition-colors"
+                              aria-label={`Retry upload`}
+                            >
+                              Retry
+                            </button>
+                            <button
+                              onClick={() => handleRemoveMedia(media.id)}
+                              className="text-[9px] bg-red-900/50 hover:bg-red-900/70 text-white px-1.5 py-0.5 rounded transition-colors"
+                              aria-label={`Remove failed upload`}
+                            >
+                              Remove
+                            </button>
+                          </div>
                         </div>
                       )}
 
