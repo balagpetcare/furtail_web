@@ -78,14 +78,12 @@ export function PopoverPicker({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button
-          disabled={disabled || isLoading}
-          className={`px-3 py-1.5 rounded-full text-sm font-medium border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${className}`}
-        >
-          {triggerIcon}
-          {triggerLabel}
-        </button>
+      <PopoverTrigger
+        disabled={disabled || isLoading}
+        className={`px-3 py-1.5 rounded-full text-sm font-medium border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1 ${className}`}
+      >
+        {triggerIcon}
+        {triggerLabel}
       </PopoverTrigger>
       <PopoverContent className="w-72 p-0">
         <div className="space-y-2 p-3">

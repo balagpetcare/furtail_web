@@ -612,148 +612,103 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
               </div>
             )}
 
-            {/* Background Style (Text Posts) */}
+            {/* Background Style (Text Posts) - Database-driven scroller */}
             {draft.media.length === 0 && (
               <div className="mb-4">
-                <label className="text-xs font-semibold text-gray-600 mb-2 block">
-                  Text Background
-                </label>
-                <div className="grid grid-cols-4 gap-2">
-                  {BACKGROUND_STYLES.map((style) => (
-                    <button
-                      key={style.value}
-                      onClick={() => {
-                        setDraft((prev) => ({
-                          ...prev,
-                          backgroundStyle: style.value,
-                        }));
-                      }}
-                      className={`h-12 rounded-lg border-2 transition-all ${
-                        draft.backgroundStyle === style.value
-                          ? "border-purple-600"
-                          : "border-gray-200"
-                      } ${style.color}`}
-                      title={style.label}
-                    />
-                  ))}
-                </div>
+                <BackgroundStylesScroller
+                  styles={backgroundStylesQuery.data?.data || null}
+                  isLoading={backgroundStylesQuery.isLoading}
+                  selected={draft.backgroundStyle}
+                  onSelect={(styleKey) => {
+                    setDraft((prev) => ({
+                      ...prev,
+                      backgroundStyle: styleKey,
+                    }));
+                  }}
+                />
               </div>
             )}
 
             {/* Feeling & Activity */}
-            <div className="grid grid-cols-2 gap-2 mb-4">
-              {/* Feeling */}
-              <Popover>
-                <PopoverTrigger className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">
-                    <SmileIcon className="w-4 h-4 text-gray-600" />
-                    <span className="text-xs font-medium text-gray-700 truncate">
-                      {draft.feelingLabel || "Feeling"}
-                    </span>
-                </PopoverTrigger>
-                <PopoverContent className="w-72 p-2 max-h-80 overflow-y-auto" align="start">
-                  <div className="space-y-1">
-                    {feelingActivities?.data
-                      ?.filter((item) => item.type === "FEELING")
-                      .map((item) => (
-                        <button
-                          key={item.id}
-                          onClick={() => {
-                            setDraft((prev) => ({
-                              ...prev,
-                              feelingId: item.id,
-                              feelingLabel: item.labelEn,
-                              feelingEmoji: item.emoji,
-                            }));
-                          }}
-                          className={`w-full text-left px-3 py-2 rounded-lg transition-colors flex items-center gap-2 ${
-                            draft.feelingId === item.id
-                              ? "bg-purple-100"
-                              : "hover:bg-gray-100"
-                          }`}
-                        >
-                          <span className="text-lg">{item.emoji}</span>
-                          <span className="text-sm">{item.labelEn}</span>
-                        </button>
-                      ))}
-                  </div>
-                </PopoverContent>
-              </Popover>
+            <div className="flex gap-2 mb-4 flex-wrap">
+              {/* Feeling - Database-driven */}
+              <PopoverPicker
+                options={feelingsQuery.data?.data || null}
+                isLoading={feelingsQuery.isLoading}
+                error={feelingsQuery.error ? "Unable to load feelings" : undefined}
+                onRetry={() => feelingsQuery.refetch()}
+                onSelect={(option) => {
+                  setDraft((prev) => ({
+                    ...prev,
+                    feelingId: option.key,
+                    feelingLabel: option.label,
+                    feelingEmoji: option.emoji,
+                  }));
+                }}
+                triggerLabel="Feeling"
+                triggerIcon={<SmileIcon className="w-4 h-4" />}
+              />
 
-              {/* Activity */}
-              <Popover>
-                <PopoverTrigger className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">
-                    <SmileIcon className="w-4 h-4 text-gray-600" />
-                    <span className="text-xs font-medium text-gray-700 truncate">
-                      {draft.activityLabel || "Activity"}
-                    </span>
-                </PopoverTrigger>
-                <PopoverContent className="w-72 p-2 max-h-80 overflow-y-auto" align="start">
-                  <div className="space-y-1">
-                    {feelingActivities?.data
-                      ?.filter((item) => item.type === "ACTIVITY")
-                      .map((item) => (
-                        <button
-                          key={item.id}
-                          onClick={() => {
-                            setDraft((prev) => ({
-                              ...prev,
-                              activityId: item.id,
-                              activityLabel: item.labelEn,
-                              activityEmoji: item.emoji,
-                            }));
-                          }}
-                          className={`w-full text-left px-3 py-2 rounded-lg transition-colors flex items-center gap-2 ${
-                            draft.activityId === item.id
-                              ? "bg-purple-100"
-                              : "hover:bg-gray-100"
-                          }`}
-                        >
-                          <span className="text-lg">{item.emoji}</span>
-                          <span className="text-sm">{item.labelEn}</span>
-                        </button>
-                      ))}
-                  </div>
-                </PopoverContent>
-              </Popover>
+              {/* Activity - Database-driven */}
+              <PopoverPicker
+                options={activitiesQuery.data?.data || null}
+                isLoading={activitiesQuery.isLoading}
+                error={activitiesQuery.error ? "Unable to load activities" : undefined}
+                onRetry={() => activitiesQuery.refetch()}
+                onSelect={(option) => {
+                  setDraft((prev) => ({
+                    ...prev,
+                    activityId: option.key,
+                    activityLabel: option.label,
+                    activityEmoji: option.emoji,
+                  }));
+                }}
+                triggerLabel="Activity"
+                triggerIcon={<SmileIcon className="w-4 h-4" />}
+              />
+
             </div>
 
-            {/* Tagged Pets */}
+            {/* Tagged Pets - Compact searchable popup (if user has pets) */}
             {userPets && userPets.length > 0 && (
-              <div className="mb-4">
-                <label className="text-xs font-semibold text-gray-600 mb-2 block">
-                  Tag Pets
-                </label>
-                <div className="space-y-1 max-h-40 overflow-y-auto border border-gray-200 rounded-lg p-2">
-                  {userPets.map((pet: any) => (
-                    <label
-                      key={pet.id}
-                      className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={draft.taggedPetIds.includes(pet.id)}
-                        onChange={(e) => {
+              <Popover>
+                <PopoverTrigger className="px-3 py-1.5 rounded-full text-sm font-medium border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                  Tag Pet
+                </PopoverTrigger>
+                <PopoverContent className="w-72 p-0">
+                  <div className="space-y-2 p-3 max-h-64 overflow-y-auto">
+                    {userPets.map((pet: any) => (
+                      <button
+                        key={pet.id}
+                        onClick={() => {
                           setDraft((prev) => ({
                             ...prev,
-                            taggedPetIds: e.target.checked
-                              ? [...prev.taggedPetIds, pet.id]
-                              : prev.taggedPetIds.filter(
-                                  (id) => id !== pet.id
-                                ),
+                            taggedPetIds: prev.taggedPetIds.includes(pet.id)
+                              ? prev.taggedPetIds.filter((id) => id !== pet.id)
+                              : [...prev.taggedPetIds, pet.id],
                           }));
                         }}
-                        className="w-4 h-4 rounded"
-                      />
-                      <div className="flex-1 text-sm">
-                        <div className="font-medium text-gray-700">{pet.name}</div>
-                        {pet.breed && (
-                          <div className="text-xs text-gray-600">{pet.breed}</div>
-                        )}
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              </div>
+                        className={`w-full text-left px-3 py-2 rounded-lg transition-colors text-sm flex items-center gap-2 ${
+                          draft.taggedPetIds.includes(pet.id)
+                            ? "bg-blue-100 text-blue-900"
+                            : "hover:bg-gray-100"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={draft.taggedPetIds.includes(pet.id)}
+                          onChange={() => {}}
+                          className="w-4 h-4"
+                        />
+                        <div className="flex-1">
+                          <div className="font-medium">{pet.name}</div>
+                          {pet.breed && <div className="text-xs text-gray-500">{pet.breed}</div>}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
             )}
 
             {/* Location */}
