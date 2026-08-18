@@ -1,8 +1,22 @@
 import { CreatePostInput, PostType, PostCategory, PetPostType } from "./api/posts";
 
 export interface MediaItem {
-  id: number;
-  url: string;
+  /** Stable local identity: React key, retry/remove/fileMap lookup. Assigned
+   * once at file-selection time and never reassigned — must NOT be replaced
+   * by the server media id after upload, or retry/remove/React reconciliation
+   * break. */
+  clientId: number;
+  /** Local blob: URL for immediate composer preview, created at selection
+   * time. Kept alive (never revoked) through LOCAL/UPLOADING/READY/FAILED —
+   * revoked only on explicit remove, discard, successful submit, or true
+   * unmount. The composer always prefers this over serverUrl so preview
+   * rendering never depends on the server URL being resolvable. */
+  previewUrl: string;
+  /** Present only after a successful upload. */
+  serverMediaId?: number;
+  /** Present only after a successful upload; the canonical persisted URL. */
+  serverUrl?: string;
+  thumbnailUrl?: string | null;
   type: "IMAGE" | "VIDEO" | "FILE";
   status: "LOCAL" | "UPLOADING" | "READY" | "FAILED";
   error?: string;
@@ -51,9 +65,9 @@ export function inferPostType(media: MediaItem[]): PostType {
 
 export function draftToCreatePostInput(draft: CreatePostDraft): CreatePostInput {
   const mediaIds = draft.media
-    .filter((m) => m.status === "READY")
+    .filter((m) => m.status === "READY" && typeof m.serverMediaId === "number")
     .sort((a, b) => a.order - b.order)
-    .map((m) => m.id);
+    .map((m) => m.serverMediaId as number);
 
   return {
     caption: draft.caption || undefined,

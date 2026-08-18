@@ -14,7 +14,7 @@ describe("inferPostType", () => {
   it("returns IMAGE when only images", () => {
     assert.strictEqual(
       inferPostType([
-        { id: 1, url: "test.jpg", type: "IMAGE", status: "READY", order: 0 },
+        { clientId: 1, previewUrl: "blob:test1", serverMediaId: 101, serverUrl: "/api/v1/media/test.jpg", type: "IMAGE", status: "READY", order: 0 },
       ]),
       "IMAGE"
     );
@@ -23,8 +23,8 @@ describe("inferPostType", () => {
   it("returns VIDEO when any video is present", () => {
     assert.strictEqual(
       inferPostType([
-        { id: 1, url: "test.jpg", type: "IMAGE", status: "READY", order: 0 },
-        { id: 2, url: "test.mp4", type: "VIDEO", status: "READY", order: 1 },
+        { clientId: 1, previewUrl: "blob:test1", serverMediaId: 101, serverUrl: "/api/v1/media/test.jpg", type: "IMAGE", status: "READY", order: 0 },
+        { clientId: 2, previewUrl: "blob:test2", serverMediaId: 102, serverUrl: "/api/v1/media/test.mp4", type: "VIDEO", status: "READY", order: 1 },
       ]),
       "VIDEO"
     );
@@ -33,7 +33,7 @@ describe("inferPostType", () => {
   it("returns VIDEO for video-only media", () => {
     assert.strictEqual(
       inferPostType([
-        { id: 1, url: "test.mp4", type: "VIDEO", status: "READY", order: 0 },
+        { clientId: 1, previewUrl: "blob:test1", serverMediaId: 101, serverUrl: "/api/v1/media/test.mp4", type: "VIDEO", status: "READY", order: 0 },
       ]),
       "VIDEO"
     );
@@ -60,15 +60,51 @@ describe("draftToCreatePostInput", () => {
       ...DEFAULT_DRAFT,
       caption: "Test",
       media: [
-        { id: 2, url: "b.jpg", type: "IMAGE" as const, status: "READY" as const, order: 1 },
-        { id: 1, url: "a.jpg", type: "IMAGE" as const, status: "READY" as const, order: 0 },
-        { id: 3, url: "c.jpg", type: "IMAGE" as const, status: "UPLOADING" as const, order: 2 },
+        { clientId: 2, previewUrl: "blob:b", serverMediaId: 1002, serverUrl: "/api/v1/media/b.jpg", type: "IMAGE" as const, status: "READY" as const, order: 1 },
+        { clientId: 1, previewUrl: "blob:a", serverMediaId: 1001, serverUrl: "/api/v1/media/a.jpg", type: "IMAGE" as const, status: "READY" as const, order: 0 },
+        { clientId: 3, previewUrl: "blob:c", type: "IMAGE" as const, status: "UPLOADING" as const, order: 2 },
       ],
     };
 
     const input = draftToCreatePostInput(draft);
 
-    assert.deepStrictEqual(input.mediaIds, [1, 2]);
+    // mediaIds must be built from serverMediaId (the durable server id), not
+    // clientId (the ephemeral local identity) — and must exclude anything
+    // not yet READY even if it happens to carry a serverMediaId.
+    assert.deepStrictEqual(input.mediaIds, [1001, 1002]);
+  });
+
+  it("never includes a clientId as a mediaId, even if it collides numerically with a real serverMediaId", () => {
+    const draft = {
+      ...DEFAULT_DRAFT,
+      caption: "Test",
+      media: [
+        // clientId 1 deliberately collides with another item's serverMediaId
+        // to prove mediaIds is built from serverMediaId, not clientId.
+        { clientId: 1, previewUrl: "blob:a", serverMediaId: 9001, serverUrl: "/api/v1/media/a.jpg", type: "IMAGE" as const, status: "READY" as const, order: 0 },
+      ],
+    };
+
+    const input = draftToCreatePostInput(draft);
+
+    assert.deepStrictEqual(input.mediaIds, [9001]);
+    assert.ok(!input.mediaIds?.includes(1));
+  });
+
+  it("excludes READY-looking items that never actually received a serverMediaId (upload contract violation)", () => {
+    const draft = {
+      ...DEFAULT_DRAFT,
+      caption: "Test",
+      media: [
+        // Defensive case: status says READY but serverMediaId is missing —
+        // must never leak into the submitted payload.
+        { clientId: 1, previewUrl: "blob:a", type: "IMAGE" as const, status: "READY" as const, order: 0 },
+      ],
+    };
+
+    const input = draftToCreatePostInput(draft);
+
+    assert.strictEqual(input.mediaIds, undefined);
   });
 
   it("preserves tagged pet IDs", () => {

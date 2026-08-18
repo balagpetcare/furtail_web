@@ -7,8 +7,8 @@ import { getMediaUrl } from '@/lib/media';
 
 interface MediaPreviewGridProps {
   media: MediaItem[];
-  onRemove: (id: number) => void;
-  onRetry: (id: number) => void;
+  onRemove: (clientId: number) => void;
+  onRetry: (clientId: number) => void;
 }
 
 export function MediaPreviewGrid({ media, onRemove, onRetry }: MediaPreviewGridProps) {
@@ -34,18 +34,21 @@ export function MediaPreviewGrid({ media, onRemove, onRetry }: MediaPreviewGridP
       <div className={`grid ${getGridClass()} gap-2`}>
         {media.map((item) => (
           <div
-            key={item.id}
+            key={item.clientId}
             className="relative rounded-lg overflow-hidden bg-gray-200 aspect-square group"
           >
-            {/* Media Preview */}
+            {/* Media Preview — always rendered from the local blob preview,
+                never the (possibly delayed/unreachable) server URL. The
+                composer's own preview must never depend on server media
+                delivery succeeding. */}
             {item.type === 'VIDEO' ? (
               <video
-                src={getMediaUrl(item.url)}
+                src={getMediaUrl(item.previewUrl)}
                 className="w-full h-full object-cover"
               />
             ) : (
               <img
-                src={getMediaUrl(item.url)}
+                src={getMediaUrl(item.previewUrl)}
                 alt="Preview"
                 className="w-full h-full object-cover"
               />
@@ -68,7 +71,7 @@ export function MediaPreviewGrid({ media, onRemove, onRetry }: MediaPreviewGridP
                 <span className="text-[10px] text-white font-medium text-center">Failed</span>
                 <div className="flex gap-1 mt-1">
                   <button
-                    onClick={() => onRetry(item.id)}
+                    onClick={() => onRetry(item.clientId)}
                     className="text-[9px] bg-white/30 hover:bg-white/50 text-white px-1.5 py-0.5 rounded transition-colors flex items-center gap-1"
                     aria-label="Retry upload"
                   >
@@ -76,7 +79,7 @@ export function MediaPreviewGrid({ media, onRemove, onRetry }: MediaPreviewGridP
                     Retry
                   </button>
                   <button
-                    onClick={() => onRemove(item.id)}
+                    onClick={() => onRemove(item.clientId)}
                     className="text-[9px] bg-red-900/50 hover:bg-red-900/70 text-white px-1.5 py-0.5 rounded transition-colors"
                     aria-label="Remove failed media"
                   >
@@ -90,7 +93,7 @@ export function MediaPreviewGrid({ media, onRemove, onRetry }: MediaPreviewGridP
             {item.status !== 'FAILED' && item.status !== 'LOCAL' && (
               <button
                 type="button"
-                onClick={() => onRemove(item.id)}
+                onClick={() => onRemove(item.clientId)}
                 className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
                 aria-label="Remove media"
               >

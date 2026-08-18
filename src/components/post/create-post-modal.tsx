@@ -29,6 +29,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { getMediaUrl } from "@/lib/media";
+import { createPreviewUrlTracker, type PreviewUrlTracker } from "@/lib/preview-url-tracker";
 import { authKeys, authApi } from "@/lib/api/auth";
 import { postsApi, postsKeys } from "@/lib/api/posts";
 import { petsApi, petsKeys } from "@/lib/api/pets";
@@ -75,10 +76,34 @@ const POST_TYPES = [
   { value: "SERVICE_REVIEW", label: "Service Review" },
 ];
 
-async function uploadPostMedia(
-  file: File,
-  onProgress?: (progress: number) => void
-): Promise<MediaItem> {
+interface UploadedMediaResult {
+  serverMediaId: number;
+  serverUrl: string;
+  thumbnailUrl: string | null;
+}
+
+/**
+ * Strict runtime parser for the upload response contract. A successful
+ * upload requires BOTH a positive numeric id and a non-empty url — silently
+ * accepting `url: ""` here is exactly how a server-side regression turns
+ * into a client-side "gray preview box" days later, since the caller would
+ * otherwise mark the item READY with nothing valid to render or submit.
+ */
+function parseUploadResponse(body: unknown): UploadedMediaResult {
+  const data = (body as { data?: Record<string, unknown> } | null)?.data;
+  const id = data?.id;
+  const url = data?.url;
+  if (typeof id !== "number" || !Number.isFinite(id) || id <= 0) {
+    throw new Error("Upload response missing a valid media id");
+  }
+  if (typeof url !== "string" || url.length === 0) {
+    throw new Error("Upload response missing a valid media url");
+  }
+  const thumbnailUrl = typeof data?.thumbnailUrl === "string" ? data.thumbnailUrl : null;
+  return { serverMediaId: id, serverUrl: url, thumbnailUrl };
+}
+
+async function uploadPostMedia(file: File): Promise<UploadedMediaResult> {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("purpose", "post");
@@ -90,15 +115,7 @@ async function uploadPostMedia(
 
   if (!res.ok) throw new Error("Failed to upload media");
   const body = await res.json();
-  const mediaId = body.data?.id;
-
-  return {
-    id: mediaId,
-    url: body.data?.url || "",
-    type: detectMediaType(file.type),
-    status: "READY",
-    order: 0,
-  };
+  return parseUploadResponse(body);
 }
 
 function detectMediaType(
@@ -117,20 +134,35 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
   const idempotencyKeyRef = useRef<string | null>(null);
   const clientMediaIdRef = useRef(0);
   const fileMapRef = useRef<Map<number, File>>(new Map()); // Store File objects for retry
+  // Tracks every previewUrl (blob:) currently alive for this draft. Revoked
+  // ONLY through explicit calls below (remove/discard/success/unmount) —
+  // never as a side effect of a draft.media status change. An effect keyed
+  // on draft.media would re-run its cleanup (and revoke the still-displayed
+  // blob URL) on every LOCAL->UPLOADING->READY transition, which was the
+  // confirmed cause of composer previews going gray. See
+  // lib/preview-url-tracker.ts for the tested lifecycle contract.
+  const previewUrlTrackerRef = useRef<PreviewUrlTracker>(createPreviewUrlTracker());
 
   useEffect(() => {
     if (open) {
       idempotencyKeyRef.current = null;
     }
-    return () => {
-      // Cleanup object URLs when component unmounts or modal closes
-      draft.media.forEach((media) => {
-        if (media.url?.startsWith("blob:")) {
-          URL.revokeObjectURL(media.url);
-        }
-      });
-    };
-  }, [open, draft.media]);
+  }, [open]);
+
+  // Unmount-only cleanup — empty deps array means this cleanup fires once,
+  // when CreatePostModal itself unmounts, not on every re-render.
+  useEffect(() => {
+    const tracker = previewUrlTrackerRef.current;
+    return () => tracker.revokeAll();
+  }, []);
+
+  const revokeAllPreviewUrls = useCallback(() => {
+    previewUrlTrackerRef.current.revokeAll();
+  }, []);
+
+  const revokePreviewUrl = useCallback((url: string) => {
+    previewUrlTrackerRef.current.revoke(url);
+  }, []);
 
   const { data: user } = useQuery({
     queryKey: authKeys.me,
@@ -166,14 +198,8 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
     },
     onSuccess: () => {
       idempotencyKeyRef.current = null;
-      // Cleanup file map on success
       fileMapRef.current.clear();
-      // Cleanup object URLs
-      draft.media.forEach((media) => {
-        if (media.url?.startsWith("blob:")) {
-          URL.revokeObjectURL(media.url);
-        }
-      });
+      revokeAllPreviewUrls();
       setDraft(DEFAULT_DRAFT);
       onOpenChange(false);
       toast.success("Post created successfully!");
@@ -201,16 +227,19 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
       if (!files) return;
       const fileArray = Array.from(files);
 
-      // Add local items immediately with LOCAL status
-      const newItems: MediaItem[] = fileArray.map((file) => {
+      // Add local items immediately with LOCAL status. clientId is the sole
+      // identity used for React keys, fileMap lookup, and retry/remove — it
+      // is never reassigned to the server media id.
+      const newItems: MediaItem[] = fileArray.map((file, index) => {
         const clientId = ++clientMediaIdRef.current;
         fileMapRef.current.set(clientId, file); // Store File for retry
+        const previewUrl = previewUrlTrackerRef.current.create(file);
         return {
-          id: clientId,
-          url: URL.createObjectURL(file),
+          clientId,
+          previewUrl,
           type: detectMediaType(file.type),
           status: "LOCAL" as const,
-          order: draft.media.length + fileArray.indexOf(file),
+          order: draft.media.length + index,
         };
       });
 
@@ -233,44 +262,41 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
         const localItem = newItems[i];
 
         try {
-          // Update status to UPLOADING
+          // Update status to UPLOADING — previewUrl/clientId/order untouched
           setDraft((prev) => ({
             ...prev,
             media: prev.media.map((m) =>
-              m.id === localItem.id ? { ...m, status: "UPLOADING" as const } : m
+              m.clientId === localItem.clientId ? { ...m, status: "UPLOADING" as const } : m
             ),
           }));
 
-          // Upload media
-          const uploadedMedia = await uploadPostMedia(file);
+          const uploaded = await uploadPostMedia(file);
 
-          // Update status to READY with server media ID
+          // Merge server fields only — keep previewUrl/clientId/order/type
+          // from the existing item so the composer never has to depend on
+          // the (possibly slow, possibly temporarily unreachable) server URL
+          // for rendering.
           setDraft((prev) => ({
             ...prev,
             media: prev.media.map((m) =>
-              m.id === localItem.id
+              m.clientId === localItem.clientId
                 ? {
-                    ...uploadedMedia,
-                    id: uploadedMedia.id, // Replace client ID with server ID
-                    order: m.order,
+                    ...m,
+                    serverMediaId: uploaded.serverMediaId,
+                    serverUrl: uploaded.serverUrl,
+                    thumbnailUrl: uploaded.thumbnailUrl,
                     status: "READY" as const,
                   }
                 : m
             ),
           }));
-        } catch (error: any) {
-          // Keep failed item visible with error
-          const errorMsg =
-            error?.message || `Failed to upload ${file.name}`;
+        } catch (error: unknown) {
+          const errorMsg = error instanceof Error ? error.message : `Failed to upload ${file.name}`;
           setDraft((prev) => ({
             ...prev,
             media: prev.media.map((m) =>
-              m.id === localItem.id
-                ? {
-                    ...m,
-                    status: "FAILED" as const,
-                    error: errorMsg,
-                  }
+              m.clientId === localItem.clientId
+                ? { ...m, status: "FAILED" as const, error: errorMsg }
                 : m
             ),
           }));
@@ -285,43 +311,43 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
 
   const handleRetryMedia = useCallback(
     async (clientId: number) => {
-      const failedItem = draft.media.find((m) => m.id === clientId);
+      const failedItem = draft.media.find((m) => m.clientId === clientId);
       const file = fileMapRef.current.get(clientId);
       if (!failedItem || !file) return;
 
       try {
-        // Update status to UPLOADING
         setDraft((prev) => ({
           ...prev,
           media: prev.media.map((m) =>
-            m.id === clientId ? { ...m, status: "UPLOADING" as const } : m
+            m.clientId === clientId ? { ...m, status: "UPLOADING" as const, error: undefined } : m
           ),
         }));
 
-        // Upload media
-        const uploadedMedia = await uploadPostMedia(file);
+        const uploaded = await uploadPostMedia(file);
 
-        // Update status to READY with server media ID
+        // Same clientId, same previewUrl, same order — only server fields
+        // and status change on retry, so no duplicate tile is ever created.
         setDraft((prev) => ({
           ...prev,
           media: prev.media.map((m) =>
-            m.id === clientId
+            m.clientId === clientId
               ? {
-                  ...uploadedMedia,
-                  id: uploadedMedia.id,
-                  order: m.order,
+                  ...m,
+                  serverMediaId: uploaded.serverMediaId,
+                  serverUrl: uploaded.serverUrl,
+                  thumbnailUrl: uploaded.thumbnailUrl,
                   status: "READY" as const,
                 }
               : m
           ),
         }));
         toast.success("Upload successful");
-      } catch (error: any) {
-        const errorMsg = error?.message || "Upload failed";
+      } catch (error: unknown) {
+        const errorMsg = error instanceof Error ? error.message : "Upload failed";
         setDraft((prev) => ({
           ...prev,
           media: prev.media.map((m) =>
-            m.id === clientId
+            m.clientId === clientId
               ? { ...m, status: "FAILED" as const, error: errorMsg }
               : m
           ),
@@ -332,21 +358,22 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
     [draft.media]
   );
 
-  const handleRemoveMedia = useCallback((id: number) => {
-    setDraft((prev) => {
-      const itemToRemove = prev.media.find((m) => m.id === id);
-      // Cleanup blob URL when removing
-      if (itemToRemove?.url?.startsWith("blob:")) {
-        URL.revokeObjectURL(itemToRemove.url);
-      }
-      // Cleanup file reference
-      fileMapRef.current.delete(id);
-      return {
-        ...prev,
-        media: prev.media.filter((m) => m.id !== id),
-      };
-    });
-  }, []);
+  const handleRemoveMedia = useCallback(
+    (clientId: number) => {
+      setDraft((prev) => {
+        const itemToRemove = prev.media.find((m) => m.clientId === clientId);
+        if (itemToRemove) {
+          revokePreviewUrl(itemToRemove.previewUrl);
+        }
+        fileMapRef.current.delete(clientId);
+        return {
+          ...prev,
+          media: prev.media.filter((m) => m.clientId !== clientId),
+        };
+      });
+    },
+    [revokePreviewUrl]
+  );
 
   const hasFailedMedia = draft.media.some((m) => m.status === "FAILED");
   const hasUploadingMedia = draft.media.some(
@@ -741,6 +768,8 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
                 variant="destructive"
                 onClick={() => {
                   setShowDiscard(false);
+                  fileMapRef.current.clear();
+                  revokeAllPreviewUrls();
                   setDraft(DEFAULT_DRAFT);
                   onOpenChange(false);
                 }}

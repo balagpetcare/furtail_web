@@ -126,6 +126,66 @@ describe('normalizePost', () => {
     assert.strictEqual(post.media[0].type, 'image/png');
   });
 
+  it('normalizes a real captured feed payload (two fresh images, order preserved, full field set)', () => {
+    // Captured verbatim (ids/timestamps redacted) from
+    // furtail_app_api's media-pipeline-e2e.integration.test.ts —
+    // "EVIDENCE + REGRESSION" case, GET /api/v1/posts/feed on a fresh
+    // store after two real uploads + Create Post.
+    const rawPost = {
+      id: 272,
+      type: 'IMAGE',
+      caption: 'two fresh images',
+      createdAt: '2026-08-18T19:24:36.000Z',
+      author: { id: 11398, profile: { displayName: 'Media Pipeline', username: 'mediap_x' } },
+      media: [
+        {
+          id: 840,
+          media: {
+            id: 840,
+            ownerUserId: 11398,
+            filename: 'a.jpg',
+            mimetype: 'image/jpeg',
+            size: 287,
+            url: '/api/v1/media/11398/1787081076433-57d0761e-a74/a.jpg',
+            thumbnailUrl: '/api/v1/media/11398/1787081076433-57d0761e-a74/a.jpg',
+            hlsUrl: null,
+            status: 'READY',
+            processingError: null,
+            createdAt: '2026-08-18T19:24:36.434Z',
+          },
+        },
+        {
+          id: 841,
+          media: {
+            id: 841,
+            ownerUserId: 11398,
+            filename: 'b.jpg',
+            mimetype: 'image/jpeg',
+            size: 287,
+            url: '/api/v1/media/11398/1787081076442-1c785421-86c/b.jpg',
+            thumbnailUrl: '/api/v1/media/11398/1787081076442-1c785421-86c/b.jpg',
+            hlsUrl: null,
+            status: 'READY',
+            processingError: null,
+            createdAt: '2026-08-18T19:24:36.443Z',
+          },
+        },
+      ],
+    };
+
+    const post = normalizePost(rawPost);
+
+    assert.strictEqual(post.media.length, 2);
+    // Order preserved exactly as the backend returned it (submission order).
+    assert.strictEqual(post.media[0].id, 840);
+    assert.strictEqual(post.media[0].url, '/api/v1/media/11398/1787081076433-57d0761e-a74/a.jpg');
+    assert.strictEqual(post.media[0].type, 'image/jpeg');
+    assert.notStrictEqual(post.media[0].url, '');
+    assert.strictEqual(post.media[1].id, 841);
+    assert.strictEqual(post.media[1].url, '/api/v1/media/11398/1787081076442-1c785421-86c/b.jpg');
+    assert.notStrictEqual(post.media[1].url, '');
+  });
+
   it('normalizes posts with flat media objects', () => {
     const rawPost = {
       id: 2,
