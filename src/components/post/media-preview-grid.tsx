@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { X, Loader, RotateCcw } from 'lucide-react';
+import { X, Loader, RotateCcw, Plus } from 'lucide-react';
 import { MediaItem } from '@/lib/create-post-draft';
 import { getMediaUrl } from '@/lib/media';
 
@@ -9,13 +9,18 @@ interface MediaPreviewGridProps {
   media: MediaItem[];
   onRemove: (clientId: number) => void;
   onRetry: (clientId: number) => void;
+  /** Renders a small "+" tile after the last item so users can add more
+   * media without a footer toolbar (COMMAND 02 §25 option B). Omit to hide. */
+  onAddMore?: () => void;
+  addMoreDisabled?: boolean;
 }
 
-export function MediaPreviewGrid({ media, onRemove, onRetry }: MediaPreviewGridProps) {
+export function MediaPreviewGrid({ media, onRemove, onRetry, onAddMore, addMoreDisabled }: MediaPreviewGridProps) {
   if (media.length === 0) return null;
 
+  const tileCount = media.length + (onAddMore ? 1 : 0);
   const getGridClass = () => {
-    switch (media.length) {
+    switch (tileCount) {
       case 1:
         return 'grid-cols-1';
       case 2:
@@ -109,6 +114,18 @@ export function MediaPreviewGrid({ media, onRemove, onRetry }: MediaPreviewGridP
             )}
           </div>
         ))}
+
+        {onAddMore && (
+          <button
+            type="button"
+            onClick={onAddMore}
+            disabled={addMoreDisabled}
+            className="aspect-square rounded-lg border-2 border-dashed border-gray-300 hover:border-purple-400 hover:bg-purple-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500"
+            aria-label="Add more media"
+          >
+            <Plus className="w-6 h-6 text-gray-400" />
+          </button>
+        )}
       </div>
     </div>
   );

@@ -18,14 +18,16 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
   Image as ImageIcon,
+  Video,
   X,
   Globe,
   Users,
   Lock,
   SmileIcon,
-  MapPin,
-  Trash2,
-  Loader,
+  Zap,
+  FileText,
+  Grid3x3,
+  Hash,
   ChevronDown,
 } from "lucide-react";
 import { getMediaUrl } from "@/lib/media";
@@ -39,7 +41,6 @@ import {
   usePostCategories,
   useContentTags,
   useBackgroundStyles,
-  type TaxonomyOption,
 } from "@/lib/api/taxonomies";
 import {
   CreatePostDraft,
@@ -47,12 +48,22 @@ import {
   MediaItem,
   draftToCreatePostInput,
 } from "@/lib/create-post-draft";
-import { PopoverPicker, SelectedChip } from "@/components/ui/popover-picker";
+import {
+  POST_TYPES,
+  getPostTypeLabel,
+  isValidPostCategoryKey,
+  applyFeelingSelection,
+  applyActivitySelection,
+  togglePetSelection,
+  toggleContentTagSelection,
+} from "@/lib/create-post-rules";
+import { PopoverPicker, SelectedChip, QUICK_PICK_TRIGGER_CLASS, type PickerOption } from "@/components/ui/popover-picker";
+import { PetTagPopover } from "@/components/post/pet-tag-popover";
+import { LocationPopover } from "@/components/post/location-popover";
+import { EmojiPopover } from "@/components/post/emoji-popover";
 import { BackgroundStylesScroller } from "@/components/post/background-styles-scroller";
-import { CreatePostMetadataRow } from "@/components/post/create-post-metadata-row";
-import { MediaActionBar } from "@/components/post/media-action-bar";
 import { MediaPreviewGrid } from "@/components/post/media-preview-grid";
-import { CaptionEditorWithPreview } from "@/components/post/caption-editor-with-preview";
+import { CaptionEditorWithPreview, type CaptionEditorHandle } from "@/components/post/caption-editor-with-preview";
 import { toast } from "sonner";
 
 interface CreatePostModalProps {
@@ -66,15 +77,13 @@ const PRIVACY_OPTIONS = [
   { value: "PRIVATE", label: "Private", icon: Lock, description: "Only you" },
 ] as const;
 
-// Canonical post types - stable domain invariants
-const POST_TYPES = [
-  { value: "GENERAL", label: "General" },
-  { value: "HEALTH_UPDATE", label: "Health Update" },
-  { value: "VACCINATION", label: "Vaccination" },
-  { value: "LOST_PET", label: "Lost Pet Alert" },
-  { value: "ADOPTION", label: "Adoption" },
-  { value: "SERVICE_REVIEW", label: "Service Review" },
-];
+const POST_TYPE_OPTIONS: PickerOption[] = POST_TYPES.map((pt, i) => ({
+  id: i,
+  key: pt.value,
+  label: pt.label,
+  sortOrder: i,
+  isActive: true,
+}));
 
 interface UploadedMediaResult {
   serverMediaId: number;
@@ -129,7 +138,9 @@ function detectMediaType(
 export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
   const [draft, setDraft] = useState<CreatePostDraft>(DEFAULT_DRAFT);
   const [showDiscard, setShowDiscard] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
+  const captionRef = useRef<CaptionEditorHandle>(null);
   const queryClient = useQueryClient();
   const idempotencyKeyRef = useRef<string | null>(null);
   const clientMediaIdRef = useRef(0);
@@ -176,7 +187,8 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
     enabled: open,
   });
 
-  // Dynamic taxonomy hooks
+  // Dynamic taxonomy hooks — the sole source for every selector below; no
+  // hardcoded production catalog anywhere in this composer.
   const feelingsQuery = useFeelings();
   const activitiesQuery = useActivities();
   const categoriesQuery = usePostCategories();
@@ -205,10 +217,10 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
       toast.success("Post created successfully!");
       queryClient.invalidateQueries({ queryKey: postsKeys.all });
     },
-    onError: (error: any) => {
-      // Handle typed ApiError with status property
-      const status = error?.status;
-      const message = error?.message || "Failed to create post. Please try again.";
+    onError: (error: unknown) => {
+      const apiError = error as { status?: number; message?: string };
+      const status = apiError?.status;
+      const message = apiError?.message || "Failed to create post. Please try again.";
 
       if (status === 409) {
         toast.error(
@@ -304,7 +316,8 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
         }
       }
 
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      if (photoInputRef.current) photoInputRef.current.value = "";
+      if (videoInputRef.current) videoInputRef.current.value = "";
     },
     [draft.media]
   );
@@ -380,6 +393,7 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
     (m) => m.status === "LOCAL" || m.status === "UPLOADING"
   );
   const readyMediaCount = draft.media.filter((m) => m.status === "READY").length;
+  const controlsDisabled = hasUploadingMedia || mutation.isPending;
 
   const canSubmit =
     !mutation.isPending &&
@@ -400,6 +414,23 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
   const privacyOption = PRIVACY_OPTIONS.find((p) => p.value === draft.privacy);
   const PrivacyIcon = privacyOption?.icon || Globe;
 
+  const postTypeLabel = getPostTypeLabel(draft.postType);
+
+  const selectedBackgroundStyle = draft.backgroundStyle
+    ? backgroundStylesQuery.data?.data?.find((s) => s.key === draft.backgroundStyle)
+    : undefined;
+
+  const selectedPets = (userPets || []).filter((pet) => draft.taggedPetIds.includes(Number(pet.id)));
+  const selectedTags = (tagsQuery.data?.data || []).filter((tag) => draft.contentTagIds.includes(tag.id));
+
+  const hasSelectedMetadata =
+    Boolean(draft.feelingId) ||
+    Boolean(draft.activityId) ||
+    selectedPets.length > 0 ||
+    Boolean(draft.locationText) ||
+    Boolean(draft.category) ||
+    selectedTags.length > 0;
+
   return (
     <>
       <Dialog open={open} onOpenChange={(newOpen) => {
@@ -412,31 +443,40 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
           onOpenChange(false);
         }
       }}>
-        <DialogContent className="sm:max-w-[680px] rounded-2xl p-0 bg-white border border-gray-100 shadow-xl max-h-[90vh] overflow-hidden flex flex-col">
-          <DialogHeader className="border-b border-gray-50 px-5 py-4 flex-shrink-0">
-            <div className="flex items-center justify-between">
-              <DialogTitle className="text-base font-bold text-gray-950">Create post</DialogTitle>
-              <DialogClose className="opacity-70 hover:opacity-100" />
-            </div>
+        <DialogContent
+          showCloseButton={false}
+          className="sm:max-w-[680px] rounded-2xl p-0 bg-white border border-gray-100 shadow-xl max-h-[90vh] overflow-hidden flex flex-col"
+        >
+          {/* Header — centered title, large tap-friendly close button */}
+          <DialogHeader className="relative border-b border-gray-50 px-4 py-3.5 flex-shrink-0">
+            <DialogTitle className="text-center text-[21px] font-bold text-gray-950 leading-none">
+              Create post
+            </DialogTitle>
+            <DialogClose
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500"
+              aria-label="Close"
+            >
+              <X className="w-5 h-5" />
+            </DialogClose>
           </DialogHeader>
 
           <div className="overflow-y-auto flex-1 px-5 py-4">
             {/* Author Section */}
-            <div className="flex items-center gap-3 mb-3">
-              <Avatar className="w-10 h-10 border border-gray-100">
+            <div className="flex items-center gap-3 mb-3.5">
+              <Avatar className="w-12 h-12 sm:w-[52px] sm:h-[52px] border border-gray-100 flex-shrink-0">
                 <AvatarImage src={getMediaUrl(avatarUrl)} alt="Avatar" />
-                <AvatarFallback className="bg-purple-50 text-purple-700 font-semibold">
+                <AvatarFallback className="bg-purple-50 text-purple-700 font-semibold text-lg">
                   {fallbackInitial}
                 </AvatarFallback>
               </Avatar>
-              <div className="flex-1">
-                <p className="font-semibold text-sm text-gray-900">
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-sm text-gray-900 truncate">
                   {displayName || "Furtail Member"}
                 </p>
 
                 {/* Privacy Selector */}
                 <Popover>
-                  <PopoverTrigger className="flex items-center gap-1 mt-1 bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded-full text-[11px] text-gray-600 font-medium transition-colors cursor-pointer">
+                  <PopoverTrigger className="flex items-center gap-1 mt-1 bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded-full text-[11px] text-gray-600 font-medium transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500">
                     <PrivacyIcon className="w-3 h-3" />
                     <span>{privacyOption?.label}</span>
                     <ChevronDown className="w-3 h-3" />
@@ -476,30 +516,285 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
               </div>
             </div>
 
-            {/* Metadata Action Row */}
-            <CreatePostMetadataRow draft={draft} />
+            {/* ── ONE Quick Picks row — every action lives here, nothing duplicated below ── */}
+            <div
+              className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide pb-1 mb-3"
+              role="toolbar"
+              aria-label="Post options"
+            >
+              {/* Post Type — own chip relabels itself on selection (not a removable chip) */}
+              <PopoverPicker
+                options={POST_TYPE_OPTIONS}
+                isLoading={false}
+                onSelect={(option) => {
+                  setDraft((prev) => ({ ...prev, postType: option.key }));
+                }}
+                triggerLabel={postTypeLabel}
+                triggerIcon={<FileText className="w-3.5 h-3.5" />}
+                showEmoji={false}
+                disabled={controlsDisabled}
+              />
 
-            {/* Caption Editor with Background Preview */}
+              {/* Feeling — database-driven, mutually exclusive with Activity */}
+              <PopoverPicker
+                options={feelingsQuery.data?.data || null}
+                isLoading={feelingsQuery.isLoading}
+                error={feelingsQuery.error ? "Unable to load feelings" : undefined}
+                onRetry={() => feelingsQuery.refetch()}
+                onSelect={(option) => {
+                  setDraft((prev) => applyFeelingSelection(prev, option));
+                }}
+                triggerLabel="Feeling"
+                triggerIcon={<SmileIcon className="w-3.5 h-3.5" />}
+                disabled={controlsDisabled}
+              />
+
+              {/* Activity — database-driven, mutually exclusive with Feeling */}
+              <PopoverPicker
+                options={activitiesQuery.data?.data || null}
+                isLoading={activitiesQuery.isLoading}
+                error={activitiesQuery.error ? "Unable to load activities" : undefined}
+                onRetry={() => activitiesQuery.refetch()}
+                onSelect={(option) => {
+                  setDraft((prev) => applyActivitySelection(prev, option));
+                }}
+                triggerLabel="Activity"
+                triggerIcon={<Zap className="w-3.5 h-3.5" />}
+                disabled={controlsDisabled}
+              />
+
+              {/* Tag Pet — authenticated user's actual pet registry, multi-select */}
+              {userPets && userPets.length > 0 && (
+                <PetTagPopover
+                  pets={userPets}
+                  selectedPetIds={draft.taggedPetIds}
+                  onToggle={(petId) => {
+                    setDraft((prev) => ({
+                      ...prev,
+                      taggedPetIds: togglePetSelection(prev.taggedPetIds, petId),
+                    }));
+                  }}
+                  disabled={controlsDisabled}
+                />
+              )}
+
+              {/* Location — small popup, no permanent full-width field */}
+              <LocationPopover
+                value={draft.locationText}
+                onSave={(locationText) => {
+                  setDraft((prev) => ({ ...prev, locationText: locationText || undefined }));
+                }}
+                disabled={controlsDisabled}
+              />
+
+              {/* Category — database-backed PostCategoryTaxonomy; only entries that
+                  round-trip onto the stable Post.category enum are accepted. */}
+              <PopoverPicker
+                options={categoriesQuery.data?.data || null}
+                isLoading={categoriesQuery.isLoading}
+                error={categoriesQuery.error ? "Unable to load categories" : undefined}
+                onRetry={() => categoriesQuery.refetch()}
+                onSelect={(option) => {
+                  if (!isValidPostCategoryKey(option.key)) {
+                    toast.error(`"${option.label}" can't be applied to a post yet`);
+                    return;
+                  }
+                  setDraft((prev) => ({
+                    ...prev,
+                    category: option.key.toUpperCase(),
+                    categoryLabel: option.label,
+                  }));
+                }}
+                triggerLabel="Category"
+                triggerIcon={<Grid3x3 className="w-3.5 h-3.5" />}
+                showEmoji={false}
+                disabled={controlsDisabled}
+              />
+
+              {/* Tags — database-backed ContentTag, multi-select (distinct from Pet tagging) */}
+              <PopoverPicker
+                multiSelect
+                options={tagsQuery.data?.data || null}
+                isLoading={tagsQuery.isLoading}
+                error={tagsQuery.error ? "Unable to load tags" : undefined}
+                onRetry={() => tagsQuery.refetch()}
+                selectedKeys={selectedTags.map((t) => t.key)}
+                onToggle={(option) => {
+                  setDraft((prev) => ({
+                    ...prev,
+                    contentTagIds: toggleContentTagSelection(prev.contentTagIds, option.id),
+                  }));
+                }}
+                triggerLabel="Tags"
+                triggerIcon={<Hash className="w-3.5 h-3.5" />}
+                showEmoji={false}
+                disabled={controlsDisabled}
+              />
+
+              {/* Photo */}
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={(e) => handleMediaSelect(e.target.files)}
+              />
+              <button
+                type="button"
+                onClick={() => photoInputRef.current?.click()}
+                disabled={controlsDisabled}
+                className={QUICK_PICK_TRIGGER_CLASS}
+                aria-label="Add photo"
+              >
+                <ImageIcon className="w-3.5 h-3.5" />
+                <span>Photo</span>
+              </button>
+
+              {/* Video */}
+              <input
+                ref={videoInputRef}
+                type="file"
+                accept="video/*"
+                className="hidden"
+                onChange={(e) => handleMediaSelect(e.target.files)}
+              />
+              <button
+                type="button"
+                onClick={() => videoInputRef.current?.click()}
+                disabled={controlsDisabled}
+                className={QUICK_PICK_TRIGGER_CLASS}
+                aria-label="Add video"
+              >
+                <Video className="w-3.5 h-3.5" />
+                <span>Video</span>
+              </button>
+
+              {/* Emoji — inserts at the caption's current cursor position */}
+              <EmojiPopover
+                onSelect={(emoji) => captionRef.current?.insertAtCursor(emoji)}
+                disabled={controlsDisabled}
+              />
+
+              {hasUploadingMedia && (
+                <span className="text-[10px] text-gray-500 animate-pulse ml-1 flex-shrink-0">
+                  Uploading...
+                </span>
+              )}
+            </div>
+
+            {/* Background swatches — one row, database-driven, no "Background" label.
+                Only offered for eligible text posts (no media selected). */}
+            {draft.media.length === 0 && (
+              <div className="mb-3">
+                <BackgroundStylesScroller
+                  styles={backgroundStylesQuery.data?.data || null}
+                  isLoading={backgroundStylesQuery.isLoading}
+                  selected={draft.backgroundStyle}
+                  onSelect={(styleKey) => {
+                    setDraft((prev) => ({
+                      ...prev,
+                      backgroundStyle: prev.backgroundStyle === styleKey ? undefined : styleKey,
+                    }));
+                  }}
+                />
+              </div>
+            )}
+
+            {/* Caption Editor — itself the live background preview when a style is selected */}
             <div className="mb-3">
               <CaptionEditorWithPreview
+                ref={captionRef}
                 value={draft.caption}
                 onChange={(value) => {
                   setDraft((prev) => ({ ...prev, caption: value }));
                 }}
-                selectedBackgroundStyle={
-                  draft.backgroundStyle
-                    ? backgroundStylesQuery.data?.data?.find((s) => s.key === draft.backgroundStyle)
-                    : undefined
-                }
+                selectedBackgroundStyle={selectedBackgroundStyle}
                 isDisabled={mutation.isPending}
               />
             </div>
 
-            {/* Media Preview Grid - Professional Layout */}
+            {/* Selected metadata — one consistent chip design, only what's actually selected */}
+            {hasSelectedMetadata && (
+              <div className="flex flex-wrap gap-2 mb-3">
+                {draft.feelingId && (
+                  <SelectedChip
+                    label={draft.feelingLabel || ""}
+                    emoji={draft.feelingEmoji}
+                    onRemove={() =>
+                      setDraft((prev) => ({
+                        ...prev,
+                        feelingId: undefined,
+                        feelingLabel: undefined,
+                        feelingEmoji: undefined,
+                      }))
+                    }
+                  />
+                )}
+                {draft.activityId && (
+                  <SelectedChip
+                    label={draft.activityLabel || ""}
+                    emoji={draft.activityEmoji}
+                    onRemove={() =>
+                      setDraft((prev) => ({
+                        ...prev,
+                        activityId: undefined,
+                        activityLabel: undefined,
+                        activityEmoji: undefined,
+                      }))
+                    }
+                  />
+                )}
+                {selectedPets.map((pet) => (
+                  <SelectedChip
+                    key={pet.id}
+                    label={pet.name}
+                    emoji="🐾"
+                    onRemove={() =>
+                      setDraft((prev) => ({
+                        ...prev,
+                        taggedPetIds: prev.taggedPetIds.filter((id) => id !== Number(pet.id)),
+                      }))
+                    }
+                  />
+                ))}
+                {draft.locationText && (
+                  <SelectedChip
+                    label={draft.locationText}
+                    emoji="📍"
+                    onRemove={() => setDraft((prev) => ({ ...prev, locationText: undefined }))}
+                  />
+                )}
+                {draft.category && (
+                  <SelectedChip
+                    label={draft.categoryLabel || draft.category}
+                    onRemove={() =>
+                      setDraft((prev) => ({ ...prev, category: undefined, categoryLabel: undefined }))
+                    }
+                  />
+                )}
+                {selectedTags.map((tag) => (
+                  <SelectedChip
+                    key={tag.id}
+                    label={`#${tag.label}`}
+                    onRemove={() =>
+                      setDraft((prev) => ({
+                        ...prev,
+                        contentTagIds: prev.contentTagIds.filter((id) => id !== tag.id),
+                      }))
+                    }
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* Media Preview — actual previews only once media exists, plus a compact "+" to add more */}
             <MediaPreviewGrid
               media={draft.media}
               onRemove={handleRemoveMedia}
               onRetry={handleRetryMedia}
+              onAddMore={() => photoInputRef.current?.click()}
+              addMoreDisabled={controlsDisabled}
             />
 
             {/* Lost Pet Conditional Fields */}
@@ -547,192 +842,10 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
                 </label>
               </div>
             )}
-
-            {/* Background Style (Text Posts) - Database-driven scroller */}
-            {draft.media.length === 0 && (
-              <div className="mb-4">
-                <BackgroundStylesScroller
-                  styles={backgroundStylesQuery.data?.data || null}
-                  isLoading={backgroundStylesQuery.isLoading}
-                  selected={draft.backgroundStyle}
-                  onSelect={(styleKey) => {
-                    setDraft((prev) => ({
-                      ...prev,
-                      backgroundStyle: styleKey,
-                    }));
-                  }}
-                />
-              </div>
-            )}
-
-            {/* Feeling & Activity */}
-            <div className="flex gap-2 mb-4 flex-wrap">
-              {/* Feeling - Database-driven */}
-              <PopoverPicker
-                options={feelingsQuery.data?.data || null}
-                isLoading={feelingsQuery.isLoading}
-                error={feelingsQuery.error ? "Unable to load feelings" : undefined}
-                onRetry={() => feelingsQuery.refetch()}
-                onSelect={(option) => {
-                  setDraft((prev) => ({
-                    ...prev,
-                    feelingId: option.key,
-                    feelingLabel: option.label,
-                    feelingEmoji: option.emoji,
-                  }));
-                }}
-                triggerLabel="Feeling"
-                triggerIcon={<SmileIcon className="w-4 h-4" />}
-              />
-
-              {/* Activity - Database-driven */}
-              <PopoverPicker
-                options={activitiesQuery.data?.data || null}
-                isLoading={activitiesQuery.isLoading}
-                error={activitiesQuery.error ? "Unable to load activities" : undefined}
-                onRetry={() => activitiesQuery.refetch()}
-                onSelect={(option) => {
-                  setDraft((prev) => ({
-                    ...prev,
-                    activityId: option.key,
-                    activityLabel: option.label,
-                    activityEmoji: option.emoji,
-                  }));
-                }}
-                triggerLabel="Activity"
-                triggerIcon={<SmileIcon className="w-4 h-4" />}
-              />
-
-            </div>
-
-            {/* Tagged Pets - Compact searchable popup (if user has pets) */}
-            {userPets && userPets.length > 0 && (
-              <Popover>
-                <PopoverTrigger className="px-3 py-1.5 rounded-full text-sm font-medium border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-                  Tag Pet
-                </PopoverTrigger>
-                <PopoverContent className="w-72 p-0">
-                  <div className="space-y-2 p-3 max-h-64 overflow-y-auto">
-                    {userPets.map((pet: any) => (
-                      <button
-                        key={pet.id}
-                        onClick={() => {
-                          setDraft((prev) => ({
-                            ...prev,
-                            taggedPetIds: prev.taggedPetIds.includes(pet.id)
-                              ? prev.taggedPetIds.filter((id) => id !== pet.id)
-                              : [...prev.taggedPetIds, pet.id],
-                          }));
-                        }}
-                        className={`w-full text-left px-3 py-2 rounded-lg transition-colors text-sm flex items-center gap-2 ${
-                          draft.taggedPetIds.includes(pet.id)
-                            ? "bg-blue-100 text-blue-900"
-                            : "hover:bg-gray-100"
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={draft.taggedPetIds.includes(pet.id)}
-                          onChange={() => {}}
-                          className="w-4 h-4"
-                        />
-                        <div className="flex-1">
-                          <div className="font-medium">{pet.name}</div>
-                          {pet.breed && <div className="text-xs text-gray-500">{pet.breed}</div>}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </PopoverContent>
-              </Popover>
-            )}
-
-            {/* Location */}
-            <div className="mb-4">
-              <input
-                type="text"
-                placeholder="Add location"
-                value={draft.locationText || ""}
-                onChange={(e) => {
-                  setDraft((prev) => ({
-                    ...prev,
-                    locationText: e.target.value,
-                  }));
-                }}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-200"
-              />
-            </div>
-
-            {/* Feeling/Activity Chips Display */}
-            {(draft.feelingId || draft.activityId) && (
-              <div className="mb-4 flex flex-wrap gap-2">
-                {draft.feelingId && (
-                  <div className="flex items-center gap-2 bg-blue-50 text-blue-900 px-3 py-1 rounded-full text-xs font-medium">
-                    <span>{draft.feelingEmoji} {draft.feelingLabel}</span>
-                    <button
-                      onClick={() => {
-                        setDraft((prev) => ({
-                          ...prev,
-                          feelingId: undefined,
-                          feelingLabel: undefined,
-                          feelingEmoji: undefined,
-                        }));
-                      }}
-                      className="text-blue-600 hover:text-blue-800"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                )}
-                {draft.activityId && (
-                  <div className="flex items-center gap-2 bg-green-50 text-green-900 px-3 py-1 rounded-full text-xs font-medium">
-                    <span>{draft.activityEmoji} {draft.activityLabel}</span>
-                    <button
-                      onClick={() => {
-                        setDraft((prev) => ({
-                          ...prev,
-                          activityId: undefined,
-                          activityLabel: undefined,
-                          activityEmoji: undefined,
-                        }));
-                      }}
-                      className="text-green-600 hover:text-green-800"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
 
-          {/* Footer */}
-          <div className="border-t border-gray-50 px-5 py-4 space-y-3 flex-shrink-0">
-            {/* Professional Media Action Bar */}
-            <div>
-              <span className="text-xs text-gray-500 font-semibold block mb-2">
-                Add to your post
-              </span>
-              <MediaActionBar
-                onPhotoSelect={handleMediaSelect}
-                onVideoSelect={(files) => {
-                  if (files) handleMediaSelect(files);
-                }}
-                onEmojiSelect={(emoji) => {
-                  setDraft((prev) => ({
-                    ...prev,
-                    caption: (prev.caption || '') + emoji,
-                  }));
-                }}
-                onBackgroundClick={() => {
-                  // Background click - handled via BackgroundStylesScroller above
-                }}
-                isDisabled={hasUploadingMedia || mutation.isPending}
-                isUploading={hasUploadingMedia}
-              />
-            </div>
-
-            {/* Submit Button */}
+          {/* Footer — just the Post button, no second toolbar */}
+          <div className="border-t border-gray-50 px-5 py-4 flex-shrink-0">
             <Button
               type="button"
               onClick={() => {

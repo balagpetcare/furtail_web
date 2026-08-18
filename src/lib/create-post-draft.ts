@@ -26,7 +26,14 @@ export interface MediaItem {
 export interface CreatePostDraft {
   caption: string;
   privacy: "PUBLIC" | "FOLLOWERS_ONLY" | "PRIVATE";
+  /** Post.category — the stable GENERAL/FUNDRAISING enum, distinct from
+   * Post.type (TEXT/IMAGE/VIDEO/REEL) and Post.postType (the pet-context
+   * enum below). Its selector is sourced from the database-backed
+   * PostCategoryTaxonomy list, but only values that round-trip onto this
+   * enum are actually sendable — see the Category quick pick's guard in
+   * create-post-modal.tsx. */
   category?: string;
+  categoryLabel?: string;
   postType: string; // GENERAL, HEALTH_UPDATE, VACCINATION, LOST_PET, ADOPTION, SERVICE_REVIEW
   backgroundStyle?: string;
   media: MediaItem[];
@@ -38,9 +45,7 @@ export interface CreatePostDraft {
   activityLabel?: string;
   activityEmoji?: string;
   taggedPetIds: number[];
-  /** ContentTag primary key ids — not yet exposed in the composer UI (see
-   * CreatePostMetadataRow's placeholder "Tags" action); this field exists so
-   * the payload adapter is ready for that wiring. */
+  /** ContentTag primary key ids — selected via the Tags quick pick. */
   contentTagIds: number[];
   lostPetName?: string;
   lostPetLocation?: string;

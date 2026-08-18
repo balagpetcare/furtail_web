@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Ban } from 'lucide-react';
 import { TaxonomyOption } from '@/lib/api/taxonomies';
 
 interface BackgroundStylesScrollerProps {
@@ -11,6 +11,13 @@ interface BackgroundStylesScrollerProps {
   onSelect: (styleKey: string) => void;
 }
 
+/**
+ * Single horizontal row of small swatches — no "Background" heading/label,
+ * no wrapping, no second row (COMMAND 02 §17/§18). Every style comes from
+ * the database-backed useBackgroundStyles() query; nothing here is
+ * hardcoded, so an admin-added/disabled/reordered style shows up on
+ * refetch without a Web deploy.
+ */
 export function BackgroundStylesScroller({
   styles,
   isLoading,
@@ -21,9 +28,8 @@ export function BackgroundStylesScroller({
 
   const scroll = (direction: 'left' | 'right') => {
     if (scrollerRef.current) {
-      const scrollAmount = 200;
       scrollerRef.current.scrollBy({
-        left: direction === 'left' ? -scrollAmount : scrollAmount,
+        left: direction === 'left' ? -160 : 160,
         behavior: 'smooth',
       });
     }
@@ -34,47 +40,61 @@ export function BackgroundStylesScroller({
   }
 
   return (
-    <div className="space-y-2">
-      <label className="text-xs font-medium text-gray-600">Background</label>
-      <div className="relative">
-        <button
-          onClick={() => scroll('left')}
-          className="absolute left-0 top-1/2 -translate-y-1/2 z-10 bg-white rounded-full p-1 shadow-sm hover:shadow-md transition-shadow"
-          aria-label="Scroll left"
-        >
-          <ChevronLeft className="w-4 h-4" />
-        </button>
+    <div className="relative flex items-center">
+      <button
+        type="button"
+        onClick={() => scroll('left')}
+        className="flex-shrink-0 z-10 bg-white rounded-full p-1 shadow-sm hover:shadow-md transition-shadow mr-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500"
+        aria-label="Scroll backgrounds left"
+      >
+        <ChevronLeft className="w-4 h-4" />
+      </button>
 
-        <div
-          ref={scrollerRef}
-          className="flex gap-2 overflow-x-auto scrollbar-hide px-8"
-          style={{ scrollBehavior: 'smooth' }}
-        >
-          {styles.map((style) => (
+      <div
+        ref={scrollerRef}
+        className="flex gap-2 overflow-x-auto scrollbar-hide py-1"
+        style={{ scrollBehavior: 'smooth' }}
+      >
+        {styles.map((style) => {
+          const isNone = !style.colorValue;
+          const isSelected = selected === style.key;
+          const background =
+            style.styleType === 'gradient' && style.colorValueEnd
+              ? `linear-gradient(135deg, ${style.colorValue}, ${style.colorValueEnd})`
+              : style.colorValue || undefined;
+          const accessibleName = isNone
+            ? `No background${isSelected ? ' (selected)' : ''}`
+            : `${style.label} background${isSelected ? ' (selected)' : ''}`;
+
+          return (
             <button
               key={style.key}
+              type="button"
               onClick={() => onSelect(style.key)}
-              className={`flex-shrink-0 w-10 h-10 rounded-lg transition-all ${
-                selected === style.key ? 'ring-2 ring-blue-500 ring-offset-2' : 'border border-gray-200'
-              }`}
-              style={{
-                backgroundColor: style.colorValue || '#f3f4f6',
-              }}
-              title={style.label}
-              aria-label={`${style.label} background${selected === style.key ? ' (selected)' : ''}`}
-              aria-pressed={selected === style.key}
-            />
-          ))}
-        </div>
-
-        <button
-          onClick={() => scroll('right')}
-          className="absolute right-0 top-1/2 -translate-y-1/2 z-10 bg-white rounded-full p-1 shadow-sm hover:shadow-md transition-shadow"
-          aria-label="Scroll right"
-        >
-          <ChevronRight className="w-4 h-4" />
-        </button>
+              className={`flex-shrink-0 w-9 h-9 rounded-full transition-all flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-1 ${
+                isSelected
+                  ? 'ring-2 ring-purple-500 ring-offset-2'
+                  : 'border border-gray-300'
+              } ${isNone ? 'bg-white' : ''}`}
+              style={{ background }}
+              title={isNone ? 'No background' : style.label}
+              aria-label={accessibleName}
+              aria-pressed={isSelected}
+            >
+              {isNone && <Ban className="w-4 h-4 text-gray-400" aria-hidden="true" />}
+            </button>
+          );
+        })}
       </div>
+
+      <button
+        type="button"
+        onClick={() => scroll('right')}
+        className="flex-shrink-0 z-10 bg-white rounded-full p-1 shadow-sm hover:shadow-md transition-shadow ml-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500"
+        aria-label="Scroll backgrounds right"
+      >
+        <ChevronRight className="w-4 h-4" />
+      </button>
     </div>
   );
 }
