@@ -83,6 +83,10 @@ export default function HomeFeed() {
       </header>
 
       <div className="py-5 space-y-5">
+        <div className="px-4 sm:px-0 space-y-5">
+          <PostComposer />
+        </div>
+
         <StoryTray />
 
         <PeopleYouMayKnowRail />
@@ -90,7 +94,6 @@ export default function HomeFeed() {
         <ReelsRail />
 
         <div className="px-4 sm:px-0 space-y-5">
-          <PostComposer />
 
           <div className="space-y-0">
             {postsLoading && (

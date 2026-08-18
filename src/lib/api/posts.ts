@@ -1,5 +1,17 @@
 import { fetchApi } from "../api-client";
 
+// Canonical post type/category/privacy enums
+export type PostType = "TEXT" | "IMAGE" | "VIDEO" | "REEL";
+export type PostCategory = "GENERAL" | "FUNDRAISING";
+export type PostPrivacy = "PUBLIC" | "FOLLOWERS_ONLY" | "PRIVATE";
+export type PetPostType =
+  | "GENERAL"
+  | "HEALTH_UPDATE"
+  | "VACCINATION"
+  | "LOST_PET"
+  | "ADOPTION"
+  | "SERVICE_REVIEW";
+
 export const postsKeys = {
   all: ["posts"] as const,
   feed: (type: string) => [...postsKeys.all, "feed", type] as const,
@@ -79,12 +91,12 @@ export interface Post {
 
 export interface CreatePostInput {
   caption?: string | null;
-  type?: string;
-  category?: string;
+  type?: PostType;
+  category?: PostCategory;
   mediaIds?: number[];
-  privacy?: string;
-  postType?: string;
-  backgroundStyle?: string;
+  privacy?: PostPrivacy;
+  postType?: PetPostType;
+  backgroundStyle?: string; // Canonical Flutter background style IDs: none, orange_red, blue_purple, etc.
   lostPetName?: string | null;
   lostPetLocation?: string | null;
   lostPetContactVisible?: boolean;

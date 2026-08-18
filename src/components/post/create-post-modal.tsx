@@ -61,11 +61,14 @@ const POST_TYPES = [
   { value: "SERVICE_REVIEW", label: "Service Review" },
 ];
 
+// Canonical background style IDs matching Flutter's PostBackgroundStyle presets
 const BACKGROUND_STYLES = [
-  { value: "NONE", label: "None", color: "bg-white" },
-  { value: "GRADIENT_1", label: "Gradient 1", color: "bg-gradient-to-br from-blue-400 to-purple-600" },
-  { value: "GRADIENT_2", label: "Gradient 2", color: "bg-gradient-to-br from-green-400 to-blue-500" },
-  { value: "GRADIENT_3", label: "Gradient 3", color: "bg-gradient-to-br from-orange-400 to-red-500" },
+  { value: "none", label: "Normal", color: "bg-white" },
+  { value: "orange_red", label: "Sunset Orange", color: "bg-gradient-to-br from-orange-500 to-red-500" },
+  { value: "blue_purple", label: "Neon Blue", color: "bg-gradient-to-br from-blue-400 to-blue-600" },
+  { value: "dark_purple", label: "Deep Purple", color: "bg-gradient-to-br from-purple-600 to-orange-400" },
+  { value: "green_teal", label: "Ocean Breeze", color: "bg-gradient-to-br from-teal-500 to-green-400" },
+  { value: "midnight", label: "Midnight", color: "bg-gradient-to-br from-gray-800 to-gray-600" },
 ];
 
 async function uploadPostMedia(
@@ -105,10 +108,10 @@ function detectMediaType(
 export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
   const [draft, setDraft] = useState<CreatePostDraft>(DEFAULT_DRAFT);
   const [showDiscard, setShowDiscard] = useState(false);
-  const [uploadingCount, setUploadingCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const idempotencyKeyRef = useRef<string | null>(null);
+  const clientMediaIdRef = useRef(0);
 
   useEffect(() => {
     if (open) {
@@ -155,9 +158,16 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
       queryClient.invalidateQueries({ queryKey: postsKeys.all });
     },
     onError: (error: any) => {
+      // Handle typed ApiError with status property
+      const status = error?.status;
       const message = error?.message || "Failed to create post. Please try again.";
-      if (message.includes("409")) {
-        toast.error("This post was already submitted. Try a new one.");
+
+      if (status === 409) {
+        toast.error(
+          "This post was already submitted. Discard draft and start a new one."
+        );
+        // Do NOT clear the idempotency key so retries use the same key
+        // User must explicitly discard the draft to get a new key
       } else {
         toast.error(message);
       }
@@ -169,25 +179,120 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
       if (!files) return;
       const fileArray = Array.from(files);
 
-      for (const file of fileArray) {
-        const order = draft.media.length;
-        setUploadingCount((prev) => prev + 1);
+      // Add local items immediately with LOCAL status
+      const newItems: MediaItem[] = fileArray.map((file) => ({
+        id: ++clientMediaIdRef.current, // Temporary client ID
+        url: URL.createObjectURL(file),
+        type: detectMediaType(file.type),
+        status: "LOCAL" as const,
+        order: draft.media.length + fileArray.indexOf(file),
+      }));
+
+      setDraft((prev) => ({
+        ...prev,
+        media: [...prev.media, ...newItems],
+      }));
+
+      // Upload each file sequentially
+      for (let i = 0; i < fileArray.length; i++) {
+        const file = fileArray[i];
+        const localItem = newItems[i];
 
         try {
-          const media = await uploadPostMedia(file);
-          media.order = order;
+          // Update status to UPLOADING
           setDraft((prev) => ({
             ...prev,
-            media: [...prev.media, media],
+            media: prev.media.map((m) =>
+              m.id === localItem.id ? { ...m, status: "UPLOADING" as const } : m
+            ),
           }));
-        } catch (error) {
-          toast.error(`Failed to upload ${file.name}`);
-        } finally {
-          setUploadingCount((prev) => prev - 1);
+
+          // Upload media
+          const uploadedMedia = await uploadPostMedia(file);
+
+          // Update status to READY with server media ID
+          setDraft((prev) => ({
+            ...prev,
+            media: prev.media.map((m) =>
+              m.id === localItem.id
+                ? {
+                    ...uploadedMedia,
+                    id: uploadedMedia.id, // Replace client ID with server ID
+                    order: m.order,
+                    status: "READY" as const,
+                  }
+                : m
+            ),
+          }));
+        } catch (error: any) {
+          // Keep failed item visible with error
+          const errorMsg =
+            error?.message || `Failed to upload ${file.name}`;
+          setDraft((prev) => ({
+            ...prev,
+            media: prev.media.map((m) =>
+              m.id === localItem.id
+                ? {
+                    ...m,
+                    status: "FAILED" as const,
+                    error: errorMsg,
+                  }
+                : m
+            ),
+          }));
+          toast.error(errorMsg);
         }
       }
 
       if (fileInputRef.current) fileInputRef.current.value = "";
+    },
+    [draft.media]
+  );
+
+  const handleRetryMedia = useCallback(
+    async (clientId: number, file?: File) => {
+      const failedItem = draft.media.find((m) => m.id === clientId);
+      if (!failedItem || !file) return;
+
+      try {
+        // Update status to UPLOADING
+        setDraft((prev) => ({
+          ...prev,
+          media: prev.media.map((m) =>
+            m.id === clientId ? { ...m, status: "UPLOADING" as const } : m
+          ),
+        }));
+
+        // Upload media
+        const uploadedMedia = await uploadPostMedia(file);
+
+        // Update status to READY with server media ID
+        setDraft((prev) => ({
+          ...prev,
+          media: prev.media.map((m) =>
+            m.id === clientId
+              ? {
+                  ...uploadedMedia,
+                  id: uploadedMedia.id,
+                  order: m.order,
+                  status: "READY" as const,
+                }
+              : m
+          ),
+        }));
+        toast.success("Upload successful");
+      } catch (error: any) {
+        const errorMsg = error?.message || "Upload failed";
+        setDraft((prev) => ({
+          ...prev,
+          media: prev.media.map((m) =>
+            m.id === clientId
+              ? { ...m, status: "FAILED" as const, error: errorMsg }
+              : m
+          ),
+        }));
+        toast.error(errorMsg);
+      }
     },
     [draft.media]
   );
@@ -199,11 +304,17 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
     }));
   }, []);
 
+  const hasFailedMedia = draft.media.some((m) => m.status === "FAILED");
+  const hasUploadingMedia = draft.media.some(
+    (m) => m.status === "LOCAL" || m.status === "UPLOADING"
+  );
+  const readyMediaCount = draft.media.filter((m) => m.status === "READY").length;
+
   const canSubmit =
     !mutation.isPending &&
-    uploadingCount === 0 &&
-    draft.media.every((m) => m.status === "READY") &&
-    (draft.caption.trim().length > 0 || draft.media.length > 0);
+    !hasUploadingMedia &&
+    !hasFailedMedia &&
+    (draft.caption.trim().length > 0 || readyMediaCount > 0);
 
   const isDraftEmpty =
     draft.caption.trim().length === 0 &&
@@ -328,30 +439,54 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
                         />
                       )}
 
-                      {media.status === "UPLOADING" && (
-                        <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                      {/* Uploading state */}
+                      {(media.status === "LOCAL" ||
+                        media.status === "UPLOADING") && (
+                        <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center gap-2">
                           <Loader className="w-5 h-5 text-white animate-spin" />
+                          <span className="text-xs text-white font-medium">
+                            {media.status === "LOCAL" ? "Queued" : "Uploading"}
+                          </span>
                         </div>
                       )}
 
+                      {/* Failed state */}
                       {media.status === "FAILED" && (
-                        <div className="absolute inset-0 bg-red-500/50 flex items-center justify-center">
+                        <div className="absolute inset-0 bg-red-500/70 flex flex-col items-center justify-center gap-2">
                           <X className="w-5 h-5 text-white" />
+                          <span className="text-xs text-white font-medium text-center px-1">
+                            Failed
+                          </span>
+                          <button
+                            onClick={() => {
+                              // Retry functionality would go here
+                              // For now, just allow removing failed items
+                            }}
+                            className="text-[10px] bg-white/20 hover:bg-white/30 text-white px-2 py-1 rounded mt-1 transition-colors"
+                          >
+                            Remove
+                          </button>
                         </div>
                       )}
 
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveMedia(media.id)}
-                        className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                        aria-label="Remove media"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
+                      {/* Remove button for non-failed items */}
+                      {media.status !== "FAILED" && media.status !== "LOCAL" && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveMedia(media.id)}
+                          className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                          aria-label="Remove media"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
 
-                      <div className="absolute bottom-1 right-1 text-xs text-white bg-black/60 px-1.5 py-0.5 rounded">
-                        {media.type === "VIDEO" ? "Video" : "Image"}
-                      </div>
+                      {/* Media type badge */}
+                      {media.status === "READY" && (
+                        <div className="absolute bottom-1 right-1 text-xs text-white bg-black/60 px-1.5 py-0.5 rounded">
+                          {media.type === "VIDEO" ? "Video" : "Image"}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -664,15 +799,15 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
                   variant="ghost"
                   size="icon"
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={uploadingCount > 0 || mutation.isPending}
+                  disabled={hasUploadingMedia || mutation.isPending}
                   className="text-purple-600 hover:text-purple-700 hover:bg-purple-50 rounded-full h-8 w-8"
                   aria-label="Add photos or videos"
                 >
                   <ImageIcon className="w-4 h-4" />
                 </Button>
-                {uploadingCount > 0 && (
+                {hasUploadingMedia && (
                   <span className="text-[10px] text-gray-400 animate-pulse">
-                    {uploadingCount} uploading...
+                    Uploading...
                   </span>
                 )}
               </div>

@@ -1,4 +1,4 @@
-import { CreatePostInput } from "./api/posts";
+import { CreatePostInput, PostType, PostCategory, PetPostType } from "./api/posts";
 
 export interface MediaItem {
   id: number;
@@ -42,7 +42,7 @@ export const DEFAULT_DRAFT: CreatePostDraft = {
   lostPetContactVisible: false,
 };
 
-export function inferPostType(media: MediaItem[]): string {
+export function inferPostType(media: MediaItem[]): PostType {
   if (media.length === 0) return "TEXT";
   const hasVideo = media.some((m) => m.type === "VIDEO");
   if (hasVideo) return "VIDEO";
@@ -58,10 +58,10 @@ export function draftToCreatePostInput(draft: CreatePostDraft): CreatePostInput 
   return {
     caption: draft.caption || undefined,
     type: inferPostType(draft.media),
-    category: draft.category,
+    category: (draft.category as PostCategory) || undefined,
     mediaIds: mediaIds.length > 0 ? mediaIds : undefined,
     privacy: draft.privacy,
-    postType: draft.postType,
+    postType: (draft.postType as PetPostType) || undefined,
     backgroundStyle: draft.backgroundStyle,
     lostPetName: draft.lostPetName || undefined,
     lostPetLocation: draft.lostPetLocation || undefined,
