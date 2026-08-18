@@ -49,6 +49,8 @@ import {
 import { PopoverPicker, SelectedChip } from "@/components/ui/popover-picker";
 import { BackgroundStylesScroller } from "@/components/post/background-styles-scroller";
 import { CreatePostMetadataRow } from "@/components/post/create-post-metadata-row";
+import { MediaActionBar } from "@/components/post/media-action-bar";
+import { MediaPreviewGrid } from "@/components/post/media-preview-grid";
 import { toast } from "sonner";
 
 interface CreatePostModalProps {
@@ -463,86 +465,12 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
               style={{ overflow: 'hidden', height: 'auto' }}
             />
 
-            {/* Media Preview Grid */}
-            {draft.media.length > 0 && (
-              <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-100">
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {draft.media.map((media) => (
-                    <div
-                      key={media.id}
-                      className="relative rounded-lg overflow-hidden bg-gray-200 aspect-square group"
-                    >
-                      {media.type === "VIDEO" ? (
-                        <video
-                          src={getMediaUrl(media.url)}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <img
-                          src={getMediaUrl(media.url)}
-                          alt="Preview"
-                          className="w-full h-full object-cover"
-                        />
-                      )}
-
-                      {/* Uploading state */}
-                      {(media.status === "LOCAL" ||
-                        media.status === "UPLOADING") && (
-                        <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center gap-2">
-                          <Loader className="w-5 h-5 text-white animate-spin" />
-                          <span className="text-xs text-white font-medium">
-                            {media.status === "LOCAL" ? "Queued" : "Uploading"}
-                          </span>
-                        </div>
-                      )}
-
-                      {/* Failed state */}
-                      {media.status === "FAILED" && (
-                        <div className="absolute inset-0 bg-red-500/70 flex flex-col items-center justify-center gap-1 p-2">
-                          <X className="w-5 h-5 text-white" />
-                          <span className="text-[10px] text-white font-medium text-center">Failed</span>
-                          <div className="flex gap-1 mt-1">
-                            <button
-                              onClick={() => handleRetryMedia(media.id)}
-                              className="text-[9px] bg-white/30 hover:bg-white/50 text-white px-1.5 py-0.5 rounded transition-colors"
-                              aria-label={`Retry upload`}
-                            >
-                              Retry
-                            </button>
-                            <button
-                              onClick={() => handleRemoveMedia(media.id)}
-                              className="text-[9px] bg-red-900/50 hover:bg-red-900/70 text-white px-1.5 py-0.5 rounded transition-colors"
-                              aria-label={`Remove failed upload`}
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Remove button for non-failed items */}
-                      {media.status !== "FAILED" && media.status !== "LOCAL" && (
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveMedia(media.id)}
-                          className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                          aria-label="Remove media"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      )}
-
-                      {/* Media type badge */}
-                      {media.status === "READY" && (
-                        <div className="absolute bottom-1 right-1 text-xs text-white bg-black/60 px-1.5 py-0.5 rounded">
-                          {media.type === "VIDEO" ? "Video" : "Image"}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            {/* Media Preview Grid - Professional Layout */}
+            <MediaPreviewGrid
+              media={draft.media}
+              onRemove={handleRemoveMedia}
+              onRetry={handleRetryMedia}
+            />
 
             {/* Lost Pet Conditional Fields */}
             {draft.postType === "LOST_PET" && (
@@ -750,37 +678,28 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
 
           {/* Footer */}
           <div className="border-t border-gray-50 px-5 py-4 space-y-3 flex-shrink-0">
-            {/* Actions Bar */}
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-500 font-semibold">
+            {/* Professional Media Action Bar */}
+            <div>
+              <span className="text-xs text-gray-500 font-semibold block mb-2">
                 Add to your post
               </span>
-              <div className="flex items-center gap-2">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*,video/*"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => handleMediaSelect(e.target.files)}
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={hasUploadingMedia || mutation.isPending}
-                  className="text-purple-600 hover:text-purple-700 hover:bg-purple-50 rounded-full h-8 w-8"
-                  aria-label="Add photos or videos"
-                >
-                  <ImageIcon className="w-4 h-4" />
-                </Button>
-                {hasUploadingMedia && (
-                  <span className="text-[10px] text-gray-400 animate-pulse">
-                    Uploading...
-                  </span>
-                )}
-              </div>
+              <MediaActionBar
+                onPhotoSelect={handleMediaSelect}
+                onVideoSelect={(files) => {
+                  if (files) handleMediaSelect(files);
+                }}
+                onEmojiSelect={(emoji) => {
+                  setDraft((prev) => ({
+                    ...prev,
+                    caption: (prev.caption || '') + emoji,
+                  }));
+                }}
+                onBackgroundClick={() => {
+                  // Background click - handled via BackgroundStylesScroller above
+                }}
+                isDisabled={hasUploadingMedia || mutation.isPending}
+                isUploading={hasUploadingMedia}
+              />
             </div>
 
             {/* Submit Button */}
