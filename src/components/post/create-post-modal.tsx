@@ -1,14 +1,44 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogClose,
+} from "@/components/ui/dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Image as ImageIcon, X, Globe, Lock } from "lucide-react";
+import {
+  Image as ImageIcon,
+  X,
+  Globe,
+  Users,
+  Lock,
+  SmileIcon,
+  MapPin,
+  Trash2,
+  Loader,
+  ChevronDown,
+} from "lucide-react";
 import { getMediaUrl } from "@/lib/media";
 import { authKeys, authApi } from "@/lib/api/auth";
 import { postsApi, postsKeys } from "@/lib/api/posts";
+import { petsApi, petsKeys } from "@/lib/api/pets";
+import { taxonomyApi } from "@/lib/api/taxonomy";
+import {
+  CreatePostDraft,
+  DEFAULT_DRAFT,
+  MediaItem,
+  draftToCreatePostInput,
+} from "@/lib/create-post-draft";
 import { toast } from "sonner";
 
 interface CreatePostModalProps {
@@ -16,183 +46,684 @@ interface CreatePostModalProps {
   onOpenChange: (open: boolean) => void;
 }
 
-interface UploadedMedia {
-  id: number;
-  url: string;
-}
+const PRIVACY_OPTIONS = [
+  { value: "PUBLIC", label: "Public", icon: Globe, description: "Anyone can see this" },
+  { value: "FOLLOWERS_ONLY", label: "Followers", icon: Users, description: "Only your followers" },
+  { value: "PRIVATE", label: "Private", icon: Lock, description: "Only you" },
+] as const;
 
-async function uploadPostMedia(file: File): Promise<UploadedMedia> {
+const POST_TYPES = [
+  { value: "GENERAL", label: "General" },
+  { value: "HEALTH_UPDATE", label: "Health Update" },
+  { value: "VACCINATION", label: "Vaccination" },
+  { value: "LOST_PET", label: "Lost Pet Alert" },
+  { value: "ADOPTION", label: "Adoption" },
+  { value: "SERVICE_REVIEW", label: "Service Review" },
+];
+
+const BACKGROUND_STYLES = [
+  { value: "NONE", label: "None", color: "bg-white" },
+  { value: "GRADIENT_1", label: "Gradient 1", color: "bg-gradient-to-br from-blue-400 to-purple-600" },
+  { value: "GRADIENT_2", label: "Gradient 2", color: "bg-gradient-to-br from-green-400 to-blue-500" },
+  { value: "GRADIENT_3", label: "Gradient 3", color: "bg-gradient-to-br from-orange-400 to-red-500" },
+];
+
+async function uploadPostMedia(
+  file: File,
+  onProgress?: (progress: number) => void
+): Promise<MediaItem> {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("purpose", "post");
-  const res = await fetch("/api/proxy/media/upload", { method: "POST", body: formData });
+
+  const res = await fetch("/api/proxy/media/upload", {
+    method: "POST",
+    body: formData,
+  });
+
   if (!res.ok) throw new Error("Failed to upload media");
   const body = await res.json();
-  return body.data as UploadedMedia;
+  const mediaId = body.data?.id;
+
+  return {
+    id: mediaId,
+    url: body.data?.url || "",
+    type: detectMediaType(file.type),
+    status: "READY",
+    order: 0,
+  };
+}
+
+function detectMediaType(
+  mimeType: string
+): "IMAGE" | "VIDEO" | "FILE" {
+  if (mimeType.startsWith("video/")) return "VIDEO";
+  if (mimeType.startsWith("image/")) return "IMAGE";
+  return "FILE";
 }
 
 export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
-  const [content, setContent] = useState("");
-  const [attachments, setAttachments] = useState<UploadedMedia[]>([]);
-  const [uploading, setUploading] = useState(false);
+  const [draft, setDraft] = useState<CreatePostDraft>(DEFAULT_DRAFT);
+  const [showDiscard, setShowDiscard] = useState(false);
+  const [uploadingCount, setUploadingCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
-  // Owns the Create Post idempotency key for the current draft: generated
-  // lazily on first submit, reused across retries of that same draft
-  // (deliberately not cleared on error), and reset only when a post
-  // actually succeeds or the composer is reopened for a new draft — a
-  // genuinely new post gets a new key, a retry of the same one does not.
   const idempotencyKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (open) idempotencyKeyRef.current = null;
+    if (open) {
+      idempotencyKeyRef.current = null;
+    }
   }, [open]);
 
   const { data: user } = useQuery({
     queryKey: authKeys.me,
     queryFn: () => authApi.getMe(),
+    enabled: open,
+  });
+
+  const { data: userPets } = useQuery({
+    queryKey: petsKeys.myPets(),
+    queryFn: () => petsApi.getMyPets().then((res) => res.items),
+    enabled: open,
+  });
+
+  const { data: feelingActivities } = useQuery({
+    queryKey: ["feeling-activities"],
+    queryFn: () => taxonomyApi.getFeelingActivities(),
+    enabled: open,
   });
 
   const mutation = useMutation({
-    mutationFn: (caption: string) => {
+    mutationFn: async () => {
       if (!idempotencyKeyRef.current) {
         idempotencyKeyRef.current = crypto.randomUUID();
       }
+
+      const payload = draftToCreatePostInput(draft);
+
       return postsApi.createPost({
-        caption,
-        mediaIds: attachments.length ? attachments.map((a) => a.id) : undefined,
+        ...payload,
         idempotencyKey: idempotencyKeyRef.current,
       });
     },
     onSuccess: () => {
       idempotencyKeyRef.current = null;
-      setContent("");
-      setAttachments([]);
+      setDraft(DEFAULT_DRAFT);
       onOpenChange(false);
       toast.success("Post created successfully!");
       queryClient.invalidateQueries({ queryKey: postsKeys.all });
     },
-    onError: () => {
-      // Deliberately do not clear idempotencyKeyRef — a user-triggered
-      // retry of this same draft must reuse the same key.
-      toast.error("Failed to create post. Please try again.");
+    onError: (error: any) => {
+      const message = error?.message || "Failed to create post. Please try again.";
+      if (message.includes("409")) {
+        toast.error("This post was already submitted. Try a new one.");
+      } else {
+        toast.error(message);
+      }
     },
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if ((!content.trim() && attachments.length === 0) || mutation.isPending) return;
-    mutation.mutate(content);
-  };
+  const handleMediaSelect = useCallback(
+    async (files: FileList | null) => {
+      if (!files) return;
+      const fileArray = Array.from(files);
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    setUploading(true);
-    try {
-      const media = await uploadPostMedia(file);
-      setAttachments((prev) => [...prev, media]);
-    } catch {
-      toast.error("Failed to upload image");
-    } finally {
-      setUploading(false);
-    }
-  };
+      for (const file of fileArray) {
+        const order = draft.media.length;
+        setUploadingCount((prev) => prev + 1);
+
+        try {
+          const media = await uploadPostMedia(file);
+          media.order = order;
+          setDraft((prev) => ({
+            ...prev,
+            media: [...prev.media, media],
+          }));
+        } catch (error) {
+          toast.error(`Failed to upload ${file.name}`);
+        } finally {
+          setUploadingCount((prev) => prev - 1);
+        }
+      }
+
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    },
+    [draft.media]
+  );
+
+  const handleRemoveMedia = useCallback((id: number) => {
+    setDraft((prev) => ({
+      ...prev,
+      media: prev.media.filter((m) => m.id !== id),
+    }));
+  }, []);
+
+  const canSubmit =
+    !mutation.isPending &&
+    uploadingCount === 0 &&
+    draft.media.every((m) => m.status === "READY") &&
+    (draft.caption.trim().length > 0 || draft.media.length > 0);
+
+  const isDraftEmpty =
+    draft.caption.trim().length === 0 &&
+    draft.media.length === 0 &&
+    draft.taggedPetIds.length === 0 &&
+    !draft.locationText;
 
   const displayName = user?.profile.displayName;
   const avatarUrl = user?.profile.avatarMedia?.url ?? null;
   const fallbackInitial = displayName ? displayName.charAt(0).toUpperCase() : "U";
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[480px] rounded-2xl p-5 bg-white border border-gray-100 shadow-xl">
-        <DialogHeader className="border-b border-gray-50 pb-3">
-          <DialogTitle className="text-center text-base font-bold text-gray-950">Create post</DialogTitle>
-        </DialogHeader>
+  const privacyOption = PRIVACY_OPTIONS.find((p) => p.value === draft.privacy);
+  const PrivacyIcon = privacyOption?.icon || Globe;
 
-        <form onSubmit={handleSubmit} className="space-y-4 mt-2">
-          {/* User Info */}
-          <div className="flex items-center gap-3">
-            <Avatar className="w-10 h-10 border border-gray-100">
-              <AvatarImage src={getMediaUrl(avatarUrl)} alt="Avatar" />
-              <AvatarFallback className="bg-purple-50 text-purple-700 font-semibold">{fallbackInitial}</AvatarFallback>
-            </Avatar>
-            <div>
-              <p className="font-semibold text-sm text-gray-900 leading-tight">{displayName || "Furtail Member"}</p>
-              {/* Audience Selector Mockup */}
-              <div className="flex items-center gap-1 mt-1 bg-gray-100 hover:bg-gray-200/80 px-2 py-0.5 rounded-full text-[11px] text-gray-600 font-medium select-none cursor-pointer w-fit">
-                <Globe className="w-3 h-3 text-gray-500" />
-                <span>Public</span>
+  return (
+    <>
+      <Dialog open={open} onOpenChange={(newOpen) => {
+        if (!newOpen && !isDraftEmpty) {
+          setShowDiscard(true);
+        } else if (newOpen) {
+          setShowDiscard(false);
+          onOpenChange(true);
+        } else {
+          onOpenChange(false);
+        }
+      }}>
+        <DialogContent className="sm:max-w-[680px] rounded-2xl p-0 bg-white border border-gray-100 shadow-xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader className="border-b border-gray-50 px-5 py-4 flex-shrink-0">
+            <div className="flex items-center justify-between">
+              <DialogTitle className="text-base font-bold text-gray-950">Create post</DialogTitle>
+              <DialogClose className="opacity-70 hover:opacity-100" />
+            </div>
+          </DialogHeader>
+
+          <div className="overflow-y-auto flex-1 px-5 py-4">
+            {/* Author Section */}
+            <div className="flex items-center gap-3 mb-4">
+              <Avatar className="w-10 h-10 border border-gray-100">
+                <AvatarImage src={getMediaUrl(avatarUrl)} alt="Avatar" />
+                <AvatarFallback className="bg-purple-50 text-purple-700 font-semibold">
+                  {fallbackInitial}
+                </AvatarFallback>
+              </Avatar>
+              <div className="flex-1">
+                <p className="font-semibold text-sm text-gray-900">
+                  {displayName || "Furtail Member"}
+                </p>
+
+                {/* Privacy Selector */}
+                <Popover>
+                  <PopoverTrigger className="flex items-center gap-1 mt-1 bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded-full text-[11px] text-gray-600 font-medium transition-colors cursor-pointer">
+                    <PrivacyIcon className="w-3 h-3" />
+                    <span>{privacyOption?.label}</span>
+                    <ChevronDown className="w-3 h-3" />
+                  </PopoverTrigger>
+                  <PopoverContent className="w-56 p-2" align="start">
+                    {PRIVACY_OPTIONS.map((option) => {
+                      const Icon = option.icon;
+                      return (
+                        <button
+                          key={option.value}
+                          onClick={() => {
+                            setDraft((prev) => ({
+                              ...prev,
+                              privacy: option.value,
+                            }));
+                          }}
+                          className={`w-full text-left px-3 py-2 rounded-lg mb-1 transition-colors ${
+                            draft.privacy === option.value
+                              ? "bg-purple-100 text-purple-900"
+                              : "hover:bg-gray-100"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Icon className="w-4 h-4" />
+                            <div>
+                              <div className="text-sm font-medium">{option.label}</div>
+                              <div className="text-xs text-gray-600">
+                                {option.description}
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </PopoverContent>
+                </Popover>
               </div>
             </div>
-          </div>
 
-          {/* Text Area */}
-          <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            placeholder="What's on your mind?"
-            rows={5}
-            className="w-full bg-transparent resize-none outline-none text-gray-800 placeholder-gray-400 text-[15px] focus:ring-0"
-            disabled={mutation.isPending}
-          />
+            {/* Caption Editor */}
+            <textarea
+              value={draft.caption}
+              onChange={(e) => {
+                setDraft((prev) => ({ ...prev, caption: e.target.value }));
+              }}
+              placeholder="What's happening in your pet world?"
+              rows={5}
+              className="w-full bg-transparent resize-none outline-none text-gray-800 placeholder-gray-400 text-base focus:ring-0 mb-4"
+              disabled={mutation.isPending}
+            />
 
-          {/* Attachments Preview */}
-          {attachments.length > 0 && (
-            <div className="flex gap-2 flex-wrap max-h-40 overflow-y-auto p-1 bg-gray-50/50 rounded-xl border border-gray-100">
-              {attachments.map((media) => (
-                <div key={media.id} className="relative w-20 h-20 rounded-lg overflow-hidden bg-gray-100 border border-gray-200 group">
-                  <img src={getMediaUrl(media.url)} alt="Attachment" className="w-full h-full object-cover" />
-                  <button
-                    type="button"
-                    onClick={() => setAttachments((prev) => prev.filter((m) => m.id !== media.id))}
-                    className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white rounded-full p-0.5 transition-colors cursor-pointer"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
+            {/* Media Preview Grid */}
+            {draft.media.length > 0 && (
+              <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {draft.media.map((media) => (
+                    <div
+                      key={media.id}
+                      className="relative rounded-lg overflow-hidden bg-gray-200 aspect-square group"
+                    >
+                      {media.type === "VIDEO" ? (
+                        <video
+                          src={getMediaUrl(media.url)}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <img
+                          src={getMediaUrl(media.url)}
+                          alt="Preview"
+                          className="w-full h-full object-cover"
+                        />
+                      )}
+
+                      {media.status === "UPLOADING" && (
+                        <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                          <Loader className="w-5 h-5 text-white animate-spin" />
+                        </div>
+                      )}
+
+                      {media.status === "FAILED" && (
+                        <div className="absolute inset-0 bg-red-500/50 flex items-center justify-center">
+                          <X className="w-5 h-5 text-white" />
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveMedia(media.id)}
+                        className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                        aria-label="Remove media"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+
+                      <div className="absolute bottom-1 right-1 text-xs text-white bg-black/60 px-1.5 py-0.5 rounded">
+                        {media.type === "VIDEO" ? "Video" : "Image"}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          )}
+              </div>
+            )}
 
-          {/* Actions Bar */}
-          <div className="flex items-center justify-between border border-gray-100 rounded-xl p-3 bg-gray-50/30">
-            <span className="text-xs text-gray-500 font-semibold pl-1">Add to your post</span>
-            <div className="flex items-center gap-2">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handleFileSelect}
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading || mutation.isPending}
-                className="text-purple-600 hover:text-purple-700 hover:bg-purple-50 rounded-full h-8 w-8 cursor-pointer"
-              >
-                <ImageIcon className="w-4.5 h-4.5" />
-              </Button>
-              {uploading && (
-                <span className="text-[10px] text-gray-400 animate-pulse">Uploading...</span>
-              )}
+            {/* Post Type Selector */}
+            <div className="mb-4">
+              <label className="text-xs font-semibold text-gray-600 mb-2 block">
+                Post Type
+              </label>
+              <Popover>
+                <PopoverTrigger className="w-full flex items-center justify-between px-3 py-2 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">
+                    <span className="text-sm text-gray-700">
+                      {POST_TYPES.find((t) => t.value === draft.postType)
+                        ?.label || "General"}
+                    </span>
+                    <ChevronDown className="w-4 h-4 text-gray-500" />
+                </PopoverTrigger>
+                <PopoverContent className="w-full p-2" align="start">
+                  {POST_TYPES.map((type) => (
+                    <button
+                      key={type.value}
+                      onClick={() => {
+                        setDraft((prev) => ({
+                          ...prev,
+                          postType: type.value,
+                        }));
+                      }}
+                      className={`w-full text-left px-3 py-2 rounded-lg mb-1 transition-colors text-sm ${
+                        draft.postType === type.value
+                          ? "bg-purple-100 text-purple-900 font-medium"
+                          : "hover:bg-gray-100"
+                      }`}
+                    >
+                      {type.label}
+                    </button>
+                  ))}
+                </PopoverContent>
+              </Popover>
             </div>
+
+            {/* Lost Pet Conditional Fields */}
+            {draft.postType === "LOST_PET" && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg space-y-2">
+                <input
+                  type="text"
+                  placeholder="Pet name"
+                  value={draft.lostPetName || ""}
+                  onChange={(e) => {
+                    setDraft((prev) => ({
+                      ...prev,
+                      lostPetName: e.target.value,
+                    }));
+                  }}
+                  className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm outline-none focus:border-red-400"
+                />
+                <input
+                  type="text"
+                  placeholder="Last seen location"
+                  value={draft.lostPetLocation || ""}
+                  onChange={(e) => {
+                    setDraft((prev) => ({
+                      ...prev,
+                      lostPetLocation: e.target.value,
+                    }));
+                  }}
+                  className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm outline-none focus:border-red-400"
+                />
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={draft.lostPetContactVisible}
+                    onChange={(e) => {
+                      setDraft((prev) => ({
+                        ...prev,
+                        lostPetContactVisible: e.target.checked,
+                      }));
+                    }}
+                    className="w-4 h-4 rounded"
+                  />
+                  <span className="text-sm text-gray-700">
+                    Show my contact information
+                  </span>
+                </label>
+              </div>
+            )}
+
+            {/* Background Style (Text Posts) */}
+            {draft.media.length === 0 && (
+              <div className="mb-4">
+                <label className="text-xs font-semibold text-gray-600 mb-2 block">
+                  Text Background
+                </label>
+                <div className="grid grid-cols-4 gap-2">
+                  {BACKGROUND_STYLES.map((style) => (
+                    <button
+                      key={style.value}
+                      onClick={() => {
+                        setDraft((prev) => ({
+                          ...prev,
+                          backgroundStyle: style.value,
+                        }));
+                      }}
+                      className={`h-12 rounded-lg border-2 transition-all ${
+                        draft.backgroundStyle === style.value
+                          ? "border-purple-600"
+                          : "border-gray-200"
+                      } ${style.color}`}
+                      title={style.label}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Feeling & Activity */}
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              {/* Feeling */}
+              <Popover>
+                <PopoverTrigger className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">
+                    <SmileIcon className="w-4 h-4 text-gray-600" />
+                    <span className="text-xs font-medium text-gray-700 truncate">
+                      {draft.feelingLabel || "Feeling"}
+                    </span>
+                </PopoverTrigger>
+                <PopoverContent className="w-72 p-2 max-h-80 overflow-y-auto" align="start">
+                  <div className="space-y-1">
+                    {feelingActivities?.data
+                      ?.filter((item) => item.type === "FEELING")
+                      .map((item) => (
+                        <button
+                          key={item.id}
+                          onClick={() => {
+                            setDraft((prev) => ({
+                              ...prev,
+                              feelingId: item.id,
+                              feelingLabel: item.labelEn,
+                              feelingEmoji: item.emoji,
+                            }));
+                          }}
+                          className={`w-full text-left px-3 py-2 rounded-lg transition-colors flex items-center gap-2 ${
+                            draft.feelingId === item.id
+                              ? "bg-purple-100"
+                              : "hover:bg-gray-100"
+                          }`}
+                        >
+                          <span className="text-lg">{item.emoji}</span>
+                          <span className="text-sm">{item.labelEn}</span>
+                        </button>
+                      ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
+
+              {/* Activity */}
+              <Popover>
+                <PopoverTrigger className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">
+                    <SmileIcon className="w-4 h-4 text-gray-600" />
+                    <span className="text-xs font-medium text-gray-700 truncate">
+                      {draft.activityLabel || "Activity"}
+                    </span>
+                </PopoverTrigger>
+                <PopoverContent className="w-72 p-2 max-h-80 overflow-y-auto" align="start">
+                  <div className="space-y-1">
+                    {feelingActivities?.data
+                      ?.filter((item) => item.type === "ACTIVITY")
+                      .map((item) => (
+                        <button
+                          key={item.id}
+                          onClick={() => {
+                            setDraft((prev) => ({
+                              ...prev,
+                              activityId: item.id,
+                              activityLabel: item.labelEn,
+                              activityEmoji: item.emoji,
+                            }));
+                          }}
+                          className={`w-full text-left px-3 py-2 rounded-lg transition-colors flex items-center gap-2 ${
+                            draft.activityId === item.id
+                              ? "bg-purple-100"
+                              : "hover:bg-gray-100"
+                          }`}
+                        >
+                          <span className="text-lg">{item.emoji}</span>
+                          <span className="text-sm">{item.labelEn}</span>
+                        </button>
+                      ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
+
+            {/* Tagged Pets */}
+            {userPets && userPets.length > 0 && (
+              <div className="mb-4">
+                <label className="text-xs font-semibold text-gray-600 mb-2 block">
+                  Tag Pets
+                </label>
+                <div className="space-y-1 max-h-40 overflow-y-auto border border-gray-200 rounded-lg p-2">
+                  {userPets.map((pet: any) => (
+                    <label
+                      key={pet.id}
+                      className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={draft.taggedPetIds.includes(pet.id)}
+                        onChange={(e) => {
+                          setDraft((prev) => ({
+                            ...prev,
+                            taggedPetIds: e.target.checked
+                              ? [...prev.taggedPetIds, pet.id]
+                              : prev.taggedPetIds.filter(
+                                  (id) => id !== pet.id
+                                ),
+                          }));
+                        }}
+                        className="w-4 h-4 rounded"
+                      />
+                      <div className="flex-1 text-sm">
+                        <div className="font-medium text-gray-700">{pet.name}</div>
+                        {pet.breed && (
+                          <div className="text-xs text-gray-600">{pet.breed}</div>
+                        )}
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Location */}
+            <div className="mb-4">
+              <input
+                type="text"
+                placeholder="Add location"
+                value={draft.locationText || ""}
+                onChange={(e) => {
+                  setDraft((prev) => ({
+                    ...prev,
+                    locationText: e.target.value,
+                  }));
+                }}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-200"
+              />
+            </div>
+
+            {/* Feeling/Activity Chips Display */}
+            {(draft.feelingId || draft.activityId) && (
+              <div className="mb-4 flex flex-wrap gap-2">
+                {draft.feelingId && (
+                  <div className="flex items-center gap-2 bg-blue-50 text-blue-900 px-3 py-1 rounded-full text-xs font-medium">
+                    <span>{draft.feelingEmoji} {draft.feelingLabel}</span>
+                    <button
+                      onClick={() => {
+                        setDraft((prev) => ({
+                          ...prev,
+                          feelingId: undefined,
+                          feelingLabel: undefined,
+                          feelingEmoji: undefined,
+                        }));
+                      }}
+                      className="text-blue-600 hover:text-blue-800"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+                {draft.activityId && (
+                  <div className="flex items-center gap-2 bg-green-50 text-green-900 px-3 py-1 rounded-full text-xs font-medium">
+                    <span>{draft.activityEmoji} {draft.activityLabel}</span>
+                    <button
+                      onClick={() => {
+                        setDraft((prev) => ({
+                          ...prev,
+                          activityId: undefined,
+                          activityLabel: undefined,
+                          activityEmoji: undefined,
+                        }));
+                      }}
+                      className="text-green-600 hover:text-green-800"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
-          {/* Submit Button */}
-          <Button
-            type="submit"
-            disabled={(!content.trim() && attachments.length === 0) || mutation.isPending}
-            className="w-full rounded-full h-10 font-bold bg-purple-600 hover:bg-purple-700 active:scale-99 transition-all text-white disabled:opacity-50 cursor-pointer"
-          >
-            {mutation.isPending ? "Posting..." : "Post"}
-          </Button>
-        </form>
-      </DialogContent>
-    </Dialog>
+          {/* Footer */}
+          <div className="border-t border-gray-50 px-5 py-4 space-y-3 flex-shrink-0">
+            {/* Actions Bar */}
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-500 font-semibold">
+                Add to your post
+              </span>
+              <div className="flex items-center gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*,video/*"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => handleMediaSelect(e.target.files)}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadingCount > 0 || mutation.isPending}
+                  className="text-purple-600 hover:text-purple-700 hover:bg-purple-50 rounded-full h-8 w-8"
+                  aria-label="Add photos or videos"
+                >
+                  <ImageIcon className="w-4 h-4" />
+                </Button>
+                {uploadingCount > 0 && (
+                  <span className="text-[10px] text-gray-400 animate-pulse">
+                    {uploadingCount} uploading...
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Submit Button */}
+            <Button
+              type="button"
+              onClick={() => {
+                if (canSubmit) mutation.mutate();
+              }}
+              disabled={!canSubmit}
+              className="w-full rounded-full h-10 font-bold bg-purple-600 hover:bg-purple-700 active:scale-95 transition-all text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {mutation.isPending ? "Posting..." : "Post"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Discard Confirmation */}
+      {showDiscard && (
+        <Dialog open={showDiscard} onOpenChange={setShowDiscard}>
+          <DialogContent className="sm:max-w-[360px]">
+            <DialogHeader>
+              <DialogTitle>Discard post?</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-gray-600">
+              You have unsaved changes. Are you sure you want to discard this post?
+            </p>
+            <div className="flex gap-3 justify-end mt-6">
+              <Button
+                variant="outline"
+                onClick={() => setShowDiscard(false)}
+              >
+                Keep editing
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  setShowDiscard(false);
+                  setDraft(DEFAULT_DRAFT);
+                  onOpenChange(false);
+                }}
+              >
+                Discard
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
   );
 }

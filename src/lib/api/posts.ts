@@ -31,7 +31,7 @@ export interface Post {
   shareCount?: number;
   isLikedByMe: boolean;
   isBookmarkedByMe?: boolean;
-  
+
   // New Reaction System fields
   viewerReaction?: string | null;
   reactionSummary?: Record<string, number>;
@@ -42,7 +42,7 @@ export interface Post {
     displayName: string;
     reaction: string;
   }>;
-  
+
   /** Server-ranked (viewer > friend > author > engagement > recency), up
    * to 2 real comments for the Home Feed preview — see CommentPreview.
    * Optional only for backward-compat with a build that predates this
@@ -55,6 +55,52 @@ export interface Post {
     likeCount?: number;
     replyCount?: number;
   }>;
+
+  // Post metadata fields (new in Enterprise Create Post)
+  privacy?: string;
+  postType?: string;
+  backgroundStyle?: string;
+  locationTag?: string;
+  feelingId?: string;
+  feelingLabel?: string;
+  feelingEmoji?: string;
+  activityId?: string;
+  activityLabel?: string;
+  activityEmoji?: string;
+  taggedPets?: Array<{ id: number; name: string }>;
+  lostPetName?: string;
+  lostPetLocation?: string;
+  lostPetContactVisible?: boolean;
+  songTitle?: string;
+  songArtist?: string;
+  songStartMs?: number;
+  songDurationMs?: number;
+}
+
+export interface CreatePostInput {
+  caption?: string | null;
+  type?: string;
+  category?: string;
+  mediaIds?: number[];
+  privacy?: string;
+  postType?: string;
+  backgroundStyle?: string;
+  lostPetName?: string | null;
+  lostPetLocation?: string | null;
+  lostPetContactVisible?: boolean;
+  taggedPetIds?: number[];
+  songTitle?: string | null;
+  songArtist?: string | null;
+  songStartMs?: number | null;
+  songDurationMs?: number | null;
+  locationText?: string | null;
+  feelingId?: string | null;
+  feelingLabel?: string | null;
+  feelingEmoji?: string | null;
+  activityId?: string | null;
+  activityLabel?: string | null;
+  activityEmoji?: string | null;
+  idempotencyKey?: string;
 }
 /**
  * Every function below normalizes to `{ data: Post[]; nextCursor?: string
@@ -170,7 +216,7 @@ export const postsApi = {
     return fetchApi<any>(`/posts/${id}`).then(normalizePost);
   },
 
-  createPost: async (data: { caption: string; mediaIds?: number[]; idempotencyKey?: string }) => {
+  createPost: async (data: CreatePostInput) => {
     const { idempotencyKey, ...body } = data;
     return fetchApi<any>("/posts", {
       method: "POST",
