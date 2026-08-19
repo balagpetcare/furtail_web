@@ -60,7 +60,6 @@ import {
 import { PopoverPicker, SelectedChip, QUICK_PICK_TRIGGER_CLASS, type PickerOption } from "@/components/ui/popover-picker";
 import { PetTagPopover } from "@/components/post/pet-tag-popover";
 import { LocationPopover } from "@/components/post/location-popover";
-import { EmojiPopover } from "@/components/post/emoji-popover";
 import { BackgroundStylesScroller } from "@/components/post/background-styles-scroller";
 import { MediaPreviewGrid } from "@/components/post/media-preview-grid";
 import { CaptionEditorWithPreview, type CaptionEditorHandle } from "@/components/post/caption-editor-with-preview";
@@ -630,91 +629,11 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
                 showEmoji={false}
                 disabled={controlsDisabled}
               />
-
-              {/* Photo */}
-              <input
-                ref={photoInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={(e) => handleMediaSelect(e.target.files)}
-              />
-              <button
-                type="button"
-                onClick={() => photoInputRef.current?.click()}
-                disabled={controlsDisabled}
-                className={QUICK_PICK_TRIGGER_CLASS}
-                aria-label="Add photo"
-              >
-                <ImageIcon className="w-3.5 h-3.5" />
-                <span>Photo</span>
-              </button>
-
-              {/* Video */}
-              <input
-                ref={videoInputRef}
-                type="file"
-                accept="video/*"
-                className="hidden"
-                onChange={(e) => handleMediaSelect(e.target.files)}
-              />
-              <button
-                type="button"
-                onClick={() => videoInputRef.current?.click()}
-                disabled={controlsDisabled}
-                className={QUICK_PICK_TRIGGER_CLASS}
-                aria-label="Add video"
-              >
-                <Video className="w-3.5 h-3.5" />
-                <span>Video</span>
-              </button>
-
-              {/* Emoji — inserts at the caption's current cursor position */}
-              <EmojiPopover
-                onSelect={(emoji) => captionRef.current?.insertAtCursor(emoji)}
-                disabled={controlsDisabled}
-              />
-
-              {hasUploadingMedia && (
-                <span className="text-[10px] text-gray-500 animate-pulse ml-1 flex-shrink-0">
-                  Uploading...
-                </span>
-              )}
             </div>
 
-            {/* Background swatches — one row, database-driven, no "Background" label.
-                Only offered for eligible text posts (no media selected). */}
-            {draft.media.length === 0 && (
-              <div className="mb-3">
-                <BackgroundStylesScroller
-                  styles={backgroundStylesQuery.data?.data || null}
-                  isLoading={backgroundStylesQuery.isLoading}
-                  selected={draft.backgroundStyle}
-                  onSelect={(styleKey) => {
-                    setDraft((prev) => ({
-                      ...prev,
-                      backgroundStyle: prev.backgroundStyle === styleKey ? undefined : styleKey,
-                    }));
-                  }}
-                />
-              </div>
-            )}
-
-            {/* Caption Editor — itself the live background preview when a style is selected */}
-            <div className="mb-3">
-              <CaptionEditorWithPreview
-                ref={captionRef}
-                value={draft.caption}
-                onChange={(value) => {
-                  setDraft((prev) => ({ ...prev, caption: value }));
-                }}
-                selectedBackgroundStyle={selectedBackgroundStyle}
-                isDisabled={mutation.isPending}
-              />
-            </div>
-
-            {/* Selected metadata — one consistent chip design, only what's actually selected */}
+            {/* Selected metadata — one consistent chip design, only what's actually
+                selected. Kept next to the Quick Picks row (profile/metadata area),
+                never pushed down into the media section below. */}
             {hasSelectedMetadata && (
               <div className="flex flex-wrap gap-2 mb-3">
                 {draft.feelingId && (
@@ -787,6 +706,91 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
                 ))}
               </div>
             )}
+
+            {/* ── Text area, exactly as specified: TEXT AREA -> BACKGROUND ROW ->
+                PHOTO/VIDEO -> MEDIA PREVIEW ── */}
+
+            {/* Caption Editor — itself the live background preview when a style is
+                selected, with Emoji inside its own bottom-right corner (never in the
+                Quick Picks row or a separate bottom toolbar). */}
+            <div className="mb-2.5">
+              <CaptionEditorWithPreview
+                ref={captionRef}
+                value={draft.caption}
+                onChange={(value) => {
+                  setDraft((prev) => ({ ...prev, caption: value }));
+                }}
+                selectedBackgroundStyle={selectedBackgroundStyle}
+                isDisabled={mutation.isPending}
+              />
+            </div>
+
+            {/* Background swatches — one row, database-driven, no "Background" label.
+                Immediately below the text area, above Photo/Video. Only offered for
+                eligible text posts (no media selected). */}
+            {draft.media.length === 0 && (
+              <div className="mb-3">
+                <BackgroundStylesScroller
+                  styles={backgroundStylesQuery.data?.data || null}
+                  isLoading={backgroundStylesQuery.isLoading}
+                  selected={draft.backgroundStyle}
+                  onSelect={(styleKey) => {
+                    setDraft((prev) => ({
+                      ...prev,
+                      backgroundStyle: prev.backgroundStyle === styleKey ? undefined : styleKey,
+                    }));
+                  }}
+                />
+              </div>
+            )}
+
+            {/* Photo / Video — below the color row, above media previews. The sole
+                Photo/Video controls in the composer (not duplicated in the Quick
+                Picks row above). */}
+            <div className="flex items-center flex-wrap gap-2 mb-3">
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={(e) => handleMediaSelect(e.target.files)}
+              />
+              <button
+                type="button"
+                onClick={() => photoInputRef.current?.click()}
+                disabled={controlsDisabled}
+                className={QUICK_PICK_TRIGGER_CLASS}
+                aria-label="Select photo"
+              >
+                <ImageIcon className="w-4 h-4" />
+                <span>Select Photo</span>
+              </button>
+
+              <input
+                ref={videoInputRef}
+                type="file"
+                accept="video/*"
+                className="hidden"
+                onChange={(e) => handleMediaSelect(e.target.files)}
+              />
+              <button
+                type="button"
+                onClick={() => videoInputRef.current?.click()}
+                disabled={controlsDisabled}
+                className={QUICK_PICK_TRIGGER_CLASS}
+                aria-label="Select video"
+              >
+                <Video className="w-4 h-4" />
+                <span>Select Video</span>
+              </button>
+
+              {hasUploadingMedia && (
+                <span className="text-[10px] text-gray-500 animate-pulse ml-1 flex-shrink-0">
+                  Uploading...
+                </span>
+              )}
+            </div>
 
             {/* Media Preview — actual previews only once media exists, plus a compact "+" to add more */}
             <MediaPreviewGrid

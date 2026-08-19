@@ -52,14 +52,22 @@ describe("CreatePostModal — no removed UI survives", () => {
     assert.strictEqual(toolbarMatches.length, 1);
   });
 
-  it("renders Photo/Video/Emoji inside the Quick Picks row, not a separate bottom action bar", () => {
-    // The footer section (after the last closing of the scrollable body div)
-    // must only contain the Post button, not another Photo/Video/Emoji set.
+  it("the footer contains only the Post button — no Photo/Video/Emoji/Background there", () => {
     const footerStart = modalSource.indexOf("{/* Footer");
     assert.ok(footerStart !== -1, "expected a Footer comment marker");
     const footerSection = modalSource.slice(footerStart);
     assert.ok(!footerSection.includes("ImageIcon"));
     assert.ok(!footerSection.includes("EmojiPopover"));
+    assert.ok(!footerSection.includes("BackgroundStylesScroller"));
+  });
+
+  it("Photo/Video are NOT rendered inside the Quick Picks toolbar (moved below the caption/background row)", () => {
+    const toolbarStart = modalSource.indexOf('role="toolbar"');
+    const toolbarEnd = modalSource.indexOf("</div>", toolbarStart);
+    const toolbarSection = modalSource.slice(toolbarStart, toolbarEnd);
+    assert.ok(!toolbarSection.includes("Select Photo"));
+    assert.ok(!toolbarSection.includes("Select Video"));
+    assert.ok(!toolbarSection.includes("EmojiPopover"));
   });
 
   it("caption placeholder matches the required copy", () => {
@@ -78,5 +86,101 @@ describe("CreatePostModal — no removed UI survives", () => {
   it("background swatches are sourced from the database-backed query, not a local constant", () => {
     assert.ok(modalSource.includes("useBackgroundStyles"));
     assert.ok(!modalSource.includes("const BACKGROUND_STYLES"));
+  });
+});
+
+describe("CreatePostModal — exact FINAL LAYOUT REFINEMENT hierarchy", () => {
+  // Locates each landmark's FIRST occurrence in source order and asserts
+  // the required sequence: CaptionEditorWithPreview -> BackgroundStylesScroller
+  // -> Photo/Video action block -> MediaPreviewGrid.
+  function firstIndexOf(marker: string): number {
+    const index = modalSource.indexOf(marker);
+    assert.ok(index !== -1, `expected to find "${marker}" in create-post-modal.tsx`);
+    return index;
+  }
+
+  it("CaptionEditorWithPreview appears before BackgroundStylesScroller", () => {
+    const captionIndex = firstIndexOf("<CaptionEditorWithPreview");
+    const backgroundIndex = firstIndexOf("<BackgroundStylesScroller");
+    assert.ok(captionIndex < backgroundIndex, "expected text area before background row");
+  });
+
+  it("BackgroundStylesScroller appears before the Photo/Video action block", () => {
+    const backgroundIndex = firstIndexOf("<BackgroundStylesScroller");
+    const photoActionIndex = firstIndexOf("Select Photo");
+    assert.ok(backgroundIndex < photoActionIndex, "expected background row before Photo/Video actions");
+  });
+
+  it("Photo/Video action block appears before MediaPreviewGrid", () => {
+    const photoActionIndex = firstIndexOf("Select Photo");
+    const mediaGridIndex = firstIndexOf("<MediaPreviewGrid");
+    assert.ok(photoActionIndex < mediaGridIndex, "expected Photo/Video actions before media previews");
+  });
+
+  it("Photo and Video actions are labeled 'Select Photo' / 'Select Video' and appear exactly once each", () => {
+    const photoMatches = modalSource.match(/Select Photo/g) || [];
+    const videoMatches = modalSource.match(/Select Video/g) || [];
+    assert.strictEqual(photoMatches.length, 1);
+    assert.strictEqual(videoMatches.length, 1);
+  });
+
+  it("does not import EmojiPopover directly into the modal (it now lives inside CaptionEditorWithPreview)", () => {
+    assert.ok(!modalSource.includes('from "@/components/post/emoji-popover"'));
+    assert.ok(!modalSource.includes("<EmojiPopover"));
+  });
+
+  it("renders exactly one CaptionEditorWithPreview, one BackgroundStylesScroller, one MediaPreviewGrid", () => {
+    const count = (marker: string) => (modalSource.match(new RegExp(marker, "g")) || []).length;
+    assert.strictEqual(count("<CaptionEditorWithPreview"), 1);
+    assert.strictEqual(count("<BackgroundStylesScroller"), 1);
+    assert.strictEqual(count("<MediaPreviewGrid"), 1);
+  });
+});
+
+describe("CaptionEditorWithPreview — bordered field + embedded Emoji", () => {
+  const editorSource = readFileSync(join(__dirname, "caption-editor-with-preview.tsx"), "utf-8");
+
+  it("renders exactly one Emoji control, inside its own JSX (not the modal's)", () => {
+    const matches = editorSource.match(/<EmojiPopover/g) || [];
+    assert.strictEqual(matches.length, 1);
+  });
+
+  it("the default (no background) state uses a light border and soft rounded corners, not a heavy/dark border", () => {
+    assert.ok(editorSource.includes("border-gray-200"));
+    assert.ok(editorSource.includes("rounded-2xl"));
+    assert.ok(!editorSource.includes("border-black"));
+    assert.ok(!editorSource.includes("border-gray-900"));
+    assert.ok(!editorSource.includes("border-gray-800"));
+  });
+
+  it("has a soft focus-within state (not a jarring hard outline)", () => {
+    assert.ok(editorSource.includes("focus-within:"));
+  });
+
+  it("Emoji is positioned inside the editor's own corner via absolute positioning on a relative wrapper", () => {
+    assert.ok(editorSource.includes("relative"));
+    assert.ok(editorSource.includes("absolute"));
+    assert.ok(editorSource.includes("bottom-2.5") || editorSource.includes("bottom-2") || editorSource.includes("bottom-3"));
+    assert.ok(editorSource.includes("right-2.5") || editorSource.includes("right-2") || editorSource.includes("right-3"));
+  });
+
+  it("the textarea reserves right padding so its text cannot render underneath the Emoji button", () => {
+    assert.ok(/pr-\d/.test(editorSource));
+  });
+
+  it("the textarea has an accessible label", () => {
+    assert.ok(editorSource.includes('aria-label="Post caption"'));
+  });
+});
+
+describe("EmojiPopover — accessible name and no duplicate control", () => {
+  const emojiSource = readFileSync(join(__dirname, "emoji-popover.tsx"), "utf-8");
+
+  it('exposes aria-label="Add emoji" on its trigger', () => {
+    assert.ok(emojiSource.includes('aria-label="Add emoji"'));
+  });
+
+  it("supports a compact embedded mode for use inside the editor", () => {
+    assert.ok(emojiSource.includes("compact"));
   });
 });
