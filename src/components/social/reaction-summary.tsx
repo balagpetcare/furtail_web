@@ -39,7 +39,13 @@ export function ReactionSummary({ postId, summary, totalCount, topReactors }: Re
       textSummary = remaining > 0 ? `${names[0]}, ${names[1]} and ${remaining} other${remaining > 1 ? "s" : ""}` : `${names[0]} and ${names[1]}`;
     }
   } else {
-    textSummary = `${totalCount} like${totalCount !== 1 ? "s" : ""}`;
+    // If we only have "LIKE" reactions, we can say "likes"
+    // Otherwise, just show the number, or "reactions"
+    if (topReactions.length === 1 && topReactions[0] === 'LIKE') {
+      textSummary = `${totalCount} like${totalCount !== 1 ? "s" : ""}`;
+    } else {
+      textSummary = `${totalCount}`;
+    }
   }
 
   // Fallback to generic text if no specific breakdown

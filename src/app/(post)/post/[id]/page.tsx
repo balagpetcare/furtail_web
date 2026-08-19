@@ -14,6 +14,8 @@ import { PostOptionsMenu } from "@/components/post/post-options-menu";
 import { CaptionText } from "@/components/feed/caption-text";
 import { Comments } from "@/components/post/comments";
 import { usePostActions } from "@/components/post/use-post-actions";
+import { ReactionSummary } from "@/components/social/reaction-summary";
+import { PostContextMeta } from "@/components/post/post-context-meta";
 import { fetchApi } from "@/lib/api-client";
 import { getMediaUrl } from "@/lib/media";
 import { Textarea } from "@/components/ui/textarea";
@@ -53,7 +55,7 @@ export default function SinglePostPage() {
   });
   const isOwner = post ? me?.id === post.author.id : false;
 
-  const { likeMutation, bookmarkMutation, editMutation, deleteMutation, share } = usePostActions(post, {
+  const { likeMutation, reactMutation, bookmarkMutation, editMutation, deleteMutation, share } = usePostActions(post, {
     onDeleted: () => router.push("/"),
   });
 
@@ -133,13 +135,7 @@ export default function SinglePostPage() {
                 avatarFallback={safeDisplayName.charAt(0).toUpperCase()}
                 avatarHref={`/profile/${post.author.userId}`}
                 title={safeDisplayName}
-                meta={
-                  <>
-                    {post.author.username && <span className="truncate max-w-[120px]">@{post.author.username}</span>}
-                    <span>•</span>
-                    <span>{new Date(post.createdAt).toLocaleDateString()}</span>
-                  </>
-                }
+                meta={<PostContextMeta post={post} />}
                 menu={
                   <PostOptionsMenu
                     postId={post.id}
@@ -193,7 +189,7 @@ export default function SinglePostPage() {
 
               {(post.likeCount > 0 || post.commentCount > 0 || (post.shareCount ?? 0) > 0) && (
                 <div className="flex items-center justify-between text-xs text-gray-500 border-b border-gray-100 pb-3">
-                  <span>{post.likeCount > 0 ? `${post.likeCount} like${post.likeCount === 1 ? "" : "s"}` : ""}</span>
+                  <ReactionSummary postId={String(post.id)} summary={post.reactionSummary} totalCount={post.totalReactionCount ?? post.likeCount} topReactors={post.topReactors} />
                   <div className="flex items-center gap-3">
                     {post.commentCount > 0 && <span>{post.commentCount} comments</span>}
                     {(post.shareCount ?? 0) > 0 && <span>{post.shareCount} shares</span>}
@@ -203,9 +199,9 @@ export default function SinglePostPage() {
 
               <PostActionsRow
                 viewerReaction={post.viewerReaction || (post.isLikedByMe ? "LIKE" : null)}
-                likePending={likeMutation.isPending}
-                onReact={(r) => likeMutation.mutate()} // Hack for now, page.tsx needs full reactMutation
-                onRemoveReaction={() => likeMutation.mutate()}
+                likePending={reactMutation.isPending}
+                onReact={(r) => reactMutation.mutate(r)}
+                onRemoveReaction={() => reactMutation.mutate(null)}
                 onShare={share}
               />
 

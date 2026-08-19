@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { postsApi } from "@/lib/api/posts";
 import { REACTIONS } from "./reaction-control";
 import { cn } from "@/lib/utils";
@@ -33,13 +33,16 @@ export function ReactionListPopover({ postId, summary, totalCount, children }: R
     return () => clearTimeout(timeoutRef.current);
   }, []);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } = useInfiniteQuery({
     queryKey: ["post-reactors", postId, activeTab],
-    queryFn: () => postsApi.getPostReactors(postId, activeTab, 50),
+    queryFn: ({ pageParam }) => postsApi.getPostReactors(postId, activeTab, 20, pageParam as string | undefined),
+    getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
+    initialPageParam: undefined as string | undefined,
     enabled: isOpen,
     staleTime: 60000,
   });
 
+  const items = data?.pages.flatMap(p => p.items) || [];
   const availableTabs = ["ALL", ...Object.entries(summary || {}).filter(([_, count]) => count > 0).map(([type]) => type)];
 
   return (
@@ -57,7 +60,6 @@ export function ReactionListPopover({ postId, summary, totalCount, children }: R
           ref={popoverRef}
           className="absolute z-50 bottom-full mb-2 left-0 w-80 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden"
         >
-          {/* Tabs */}
           <div className="flex border-b border-gray-100 overflow-x-auto scrollbar-hide p-1">
             {availableTabs.map((tab) => {
               const count = tab === "ALL" ? totalCount : (summary?.[tab] ?? 0);
@@ -80,19 +82,30 @@ export function ReactionListPopover({ postId, summary, totalCount, children }: R
           </div>
 
           {/* List */}
-          <div className="max-h-64 overflow-y-auto p-2">
+          <div 
+            className="max-h-64 overflow-y-auto p-2"
+            onScroll={(e) => {
+              const target = e.target as HTMLDivElement;
+              if (target.scrollHeight - target.scrollTop <= target.clientHeight + 50) {
+                if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+              }
+            }}
+          >
             {isLoading ? (
               <div className="flex justify-center p-4"><Loader2 className="w-5 h-5 animate-spin text-gray-400" /></div>
-            ) : data?.items?.length ? (
+            ) : items.length ? (
               <div className="space-y-1">
-                {data.items.map((reactor) => {
+                {items.map((reactor) => {
                   const rDef = REACTIONS.find(r => r.type === reactor.reaction);
                   return (
-                    <div key={reactor.id} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded-lg group">
+                    <div key={reactor.id + reactor.reaction} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded-lg group">
                       <Link href={`/user/${reactor.userId}`} className="flex items-center gap-3">
                         <div className="w-8 h-8 bg-gray-200 rounded-full flex-shrink-0 overflow-hidden relative">
-                          {/* Avatar would go here */}
-                          <div className="w-full h-full bg-gradient-to-br from-purple-100 to-pink-100" />
+                          {reactor.avatarUrl ? (
+                            <img src={reactor.avatarUrl} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full bg-gradient-to-br from-purple-100 to-pink-100" />
+                          )}
                           {rDef && (
                             <div className={cn("absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border border-white flex items-center justify-center bg-white", rDef.color)}>
                               <div className="scale-50 origin-center">{rDef.icon}</div>
@@ -101,10 +114,12 @@ export function ReactionListPopover({ postId, summary, totalCount, children }: R
                         </div>
                         <span className="font-semibold text-sm text-gray-900 group-hover:underline">{reactor.displayName}</span>
                       </Link>
-                      {/* Action button e.g. Add Friend could go here */}
                     </div>
                   );
                 })}
+                {isFetchingNextPage && (
+                  <div className="flex justify-center p-2"><Loader2 className="w-4 h-4 animate-spin text-gray-400" /></div>
+                )}
               </div>
             ) : (
               <div className="text-center p-4 text-sm text-gray-500">No reactions yet</div>

@@ -87,14 +87,16 @@ interface ReactionControlProps {
 export function ReactionControl({ viewerReaction, onReact, onRemoveReaction, disabled }: ReactionControlProps) {
   const [trayOpen, setTrayOpen] = useState(false);
   const timeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
+  const suppressHoverRef = useRef(false);
 
   const handleMouseEnter = () => {
-    if (disabled) return;
+    if (disabled || suppressHoverRef.current) return;
     clearTimeout(timeoutRef.current);
     timeoutRef.current = setTimeout(() => setTrayOpen(true), 400); // 400ms hover delay
   };
 
   const handleMouseLeave = () => {
+    suppressHoverRef.current = false;
     clearTimeout(timeoutRef.current);
     timeoutRef.current = setTimeout(() => setTrayOpen(false), 300);
   };
@@ -134,7 +136,9 @@ export function ReactionControl({ viewerReaction, onReact, onRemoveReaction, dis
         {activeReactionDef ? (
           <span className="scale-110">{activeReactionDef.icon}</span>
         ) : (
-          <ThumbsUp className="w-4.5 h-4.5 transition-transform active:scale-120" />
+          <svg viewBox="0 0 24 24" className="w-[22px] h-[22px] fill-transparent stroke-current transition-transform active:scale-120" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path>
+          </svg>
         )}
         <span>{activeReactionDef ? activeReactionDef.label : "Like"}</span>
       </button>
@@ -150,6 +154,7 @@ export function ReactionControl({ viewerReaction, onReact, onRemoveReaction, dis
                 e.stopPropagation();
                 onReact(reaction.type);
                 setTrayOpen(false);
+                suppressHoverRef.current = true;
               }}
               aria-label={reaction.label}
             >

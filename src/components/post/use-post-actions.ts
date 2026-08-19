@@ -32,8 +32,83 @@ export function usePostActions(post: Post | undefined, options: { onDeleted?: ()
       reaction === null
         ? postsApi.unlikePost(String(post!.id))
         : postsApi.reactPost(String(post!.id), reaction),
-    onSuccess: invalidateFeeds,
-    onError: () => toast.error("Failed to update reaction"),
+    onMutate: async (newReaction) => {
+      await queryClient.cancelQueries({ queryKey: postsKeys.all });
+      const previousFeeds = queryClient.getQueriesData({ queryKey: postsKeys.all });
+      
+      queryClient.setQueriesData({ queryKey: postsKeys.all }, (old: any) => {
+        if (!old) return old;
+        if (old.pages) {
+          return {
+            ...old,
+            pages: old.pages.map((page: any) => ({
+              ...page,
+              items: page.items.map((p: any) => {
+                if (p.id === post?.id) {
+                  const oldReaction = p.viewerReaction || (p.isLikedByMe ? "LIKE" : null);
+                  const newReactionSummary = { ...(p.reactionSummary || {}) };
+                  let total = p.totalReactionCount ?? p.likeCount ?? 0;
+                  
+                  if (oldReaction) {
+                    newReactionSummary[oldReaction] = Math.max(0, (newReactionSummary[oldReaction] || 0) - 1);
+                    if (newReactionSummary[oldReaction] === 0) delete newReactionSummary[oldReaction];
+                    total--;
+                  }
+                  
+                  if (newReaction) {
+                    newReactionSummary[newReaction] = (newReactionSummary[newReaction] || 0) + 1;
+                    total++;
+                  }
+
+                  return {
+                    ...p,
+                    viewerReaction: newReaction,
+                    isLikedByMe: newReaction !== null,
+                    reactionSummary: newReactionSummary,
+                    totalReactionCount: total,
+                  };
+                }
+                return p;
+              })
+            }))
+          };
+        } else if (old.id === post?.id) {
+          const oldReaction = old.viewerReaction || (old.isLikedByMe ? "LIKE" : null);
+          const newReactionSummary = { ...(old.reactionSummary || {}) };
+          let total = old.totalReactionCount ?? old.likeCount ?? 0;
+          
+          if (oldReaction) {
+            newReactionSummary[oldReaction] = Math.max(0, (newReactionSummary[oldReaction] || 0) - 1);
+            if (newReactionSummary[oldReaction] === 0) delete newReactionSummary[oldReaction];
+            total--;
+          }
+          
+          if (newReaction) {
+            newReactionSummary[newReaction] = (newReactionSummary[newReaction] || 0) + 1;
+            total++;
+          }
+
+          return {
+            ...old,
+            viewerReaction: newReaction,
+            isLikedByMe: newReaction !== null,
+            reactionSummary: newReactionSummary,
+            totalReactionCount: total,
+          };
+        }
+        return old;
+      });
+      return { previousFeeds };
+    },
+    onError: (err, newReaction, context) => {
+      if (context?.previousFeeds) {
+        context.previousFeeds.forEach(([key, data]) => {
+          queryClient.setQueryData(key, data);
+        });
+      }
+      toast.error("Failed to update reaction");
+    },
+    onSettled: invalidateFeeds,
   });
 
   const bookmarkMutation = useMutation({

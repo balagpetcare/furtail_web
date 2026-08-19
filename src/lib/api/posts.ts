@@ -264,9 +264,7 @@ export const postsApi = {
     return fetchApi<{ likeCount: number; commentCount: number; isLikedByMe: boolean }>(`/posts/${id}/like`, { method: "DELETE" });
   },
   reactPost: async (id: string, reaction: string) => {
-    // In the future this will hit /posts/:id/reaction, but for now we fallback to the backward-compatible like endpoint if reaction is LIKE
-    // Once the backend supports the new endpoint, this should be updated to hit /posts/${id}/reaction with { method: "POST", body: { reaction } }
-    return fetchApi<{ totalReactionCount: number; reactionSummary: Record<string, number>; viewerReaction: string | null; isLikedByMe: boolean; likeCount: number; commentCount: number }>(`/posts/${id}/like`, { method: "POST" });
+    return fetchApi<{ totalReactionCount: number; reactionSummary: Record<string, number>; viewerReaction: string | null; isLikedByMe: boolean; likeCount: number; commentCount: number }>(`/posts/${id}/like`, { method: "POST", body: { reaction } });
   },
   getPostReactors: async (id: string, reactionType?: string, limit = 50, cursor?: string) => {
     const url = new URL(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:7400/api"}/posts/${id}/reactors`);

@@ -14,6 +14,8 @@ import { PostOptionsMenu } from "@/components/post/post-options-menu";
 import { CaptionText } from "@/components/feed/caption-text";
 import { Comments, CommentComposer, useCurrentUserLite } from "@/components/post/comments";
 import { usePostActions } from "@/components/post/use-post-actions";
+import { ReactionSummary } from "@/components/social/reaction-summary";
+import { PostContextMeta } from "@/components/post/post-context-meta";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import type { ReactionType } from "@/components/social/reaction-control";
@@ -115,13 +117,7 @@ function CommentModalBody({ postId, onOpenChange }: { postId: string; onOpenChan
                 avatarFallback={safeDisplayName.charAt(0).toUpperCase()}
                 avatarHref={`/profile/${post.author.userId}`}
                 title={safeDisplayName}
-                meta={
-                  <>
-                    {post.author.username && <span className="truncate max-w-[120px]">@{post.author.username}</span>}
-                    <span>•</span>
-                    <span>{new Date(post.createdAt).toLocaleDateString()}</span>
-                  </>
-                }
+                meta={<PostContextMeta post={post} />}
                 menu={
                   <PostOptionsMenu
                     postId={post.id}
@@ -172,7 +168,7 @@ function CommentModalBody({ postId, onOpenChange }: { postId: string; onOpenChan
 
               {(post.likeCount > 0 || post.commentCount > 0 || (post.shareCount ?? 0) > 0) && (
                 <div className="flex items-center justify-between text-xs text-gray-500 border-b border-gray-100 pb-3">
-                  <span>{post.likeCount > 0 ? `${post.likeCount} like${post.likeCount === 1 ? "" : "s"}` : ""}</span>
+                  <ReactionSummary postId={String(post.id)} summary={post.reactionSummary} totalCount={post.totalReactionCount ?? post.likeCount} topReactors={post.topReactors} />
                   <div className="flex items-center gap-3">
                     {post.commentCount > 0 && <span>{post.commentCount} comments</span>}
                     {(post.shareCount ?? 0) > 0 && <span>{post.shareCount} shares</span>}
