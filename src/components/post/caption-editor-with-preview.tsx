@@ -3,6 +3,14 @@
 import React, { forwardRef, useImperativeHandle, useRef, useEffect } from 'react';
 import { TaxonomyOption } from '@/lib/api/taxonomies';
 import { EmojiPopover } from '@/components/post/emoji-popover';
+import { computeAutoGrowHeight } from '@/lib/textarea-autogrow';
+
+/** Auto-grow ceiling (px) — below this, the textarea grows with content
+ * and never scrolls; at/above it, height is capped and the browser's
+ * native overflow-y: auto scrolling takes over. Two values because the
+ * background-preview state renders larger, centered text. */
+const MAX_EDITOR_HEIGHT = 200;
+const MAX_EDITOR_HEIGHT_WITH_BACKGROUND = 260;
 
 interface CaptionEditorWithPreviewProps {
   value: string;
@@ -38,8 +46,17 @@ export const CaptionEditorWithPreview = forwardRef<CaptionEditorHandle, CaptionE
     const adjustHeight = () => {
       const el = textareaRef.current;
       if (!el) return;
+      // Reset to 'auto' first so scrollHeight reflects the content's true
+      // natural height, not whatever height was set on the previous call.
       el.style.height = 'auto';
-      el.style.height = Math.min(el.scrollHeight, hasBackground ? 260 : 200) + 'px';
+      const maxHeight = hasBackground ? MAX_EDITOR_HEIGHT_WITH_BACKGROUND : MAX_EDITOR_HEIGHT;
+      const { height, overflowY } = computeAutoGrowHeight(el.scrollHeight, maxHeight);
+      el.style.height = `${height}px`;
+      // Own the overflow decision here, imperatively, on every call — a
+      // static `overflow: 'hidden'` in the JSX style prop below would
+      // silently re-clip content the moment it exceeds maxHeight, which is
+      // exactly what made long captions unscrollable before this fix.
+      el.style.overflowY = overflowY;
     };
 
     const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -108,7 +125,7 @@ export const CaptionEditorWithPreview = forwardRef<CaptionEditorHandle, CaptionE
               : 'w-full bg-transparent resize-none outline-none text-gray-800 placeholder-gray-400 text-base focus:ring-0 min-h-[52px] pr-9 pb-7'
           }
           disabled={isDisabled}
-          style={{ overflow: 'hidden', height: 'auto', color: textColor }}
+          style={{ color: textColor }}
         />
 
         {/* Emoji lives inside the editor's own corner — never in the Quick

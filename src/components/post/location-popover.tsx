@@ -57,18 +57,21 @@ export function LocationPopover({ value, onSave, disabled = false }: LocationPop
           <label htmlFor="post-location-input" className="text-xs font-medium text-gray-600">
             Location
           </label>
-          <input
-            id="post-location-input"
-            ref={inputRef}
-            type="text"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') setOpen(false);
-            }}
-            placeholder="e.g. Dhaka, Bangladesh"
-            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-200"
-          />
+          <div className="relative">
+            <MapPin className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+            <input
+              id="post-location-input"
+              ref={inputRef}
+              type="text"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setOpen(false);
+              }}
+              placeholder="e.g. Dhaka, Bangladesh"
+              className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-200"
+            />
+          </div>
           <div className="flex items-center justify-between gap-2 pt-1">
             {value ? (
               <button

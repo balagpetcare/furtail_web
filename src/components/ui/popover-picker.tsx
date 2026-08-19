@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, X, Check, ChevronDown } from 'lucide-react';
+import { Search, X, ChevronDown } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from './popover';
+import { SelectorOptionRow } from './selector-option-row';
 import { computeSingleSelectDisplay, summarizeMultiSelectLabel } from '@/lib/selector-display';
 
 export interface PickerOption {
@@ -26,7 +27,16 @@ interface PopoverPickerBaseProps {
   /** Placeholder label shown on the trigger when nothing is selected. */
   triggerLabel: string;
   triggerIcon?: React.ReactNode;
+  /** When true (default), a row whose option has an `emoji` shows it on
+   * the left. Options without one fall back to `fallbackIcon` when given —
+   * this is how Category/Tags (whose taxonomy has no per-row emoji column)
+   * still get a stable, meaningful left-side visual instead of no icon at
+   * all, without fabricating a per-key icon the database doesn't define. */
   showEmoji?: boolean;
+  /** Shown on rows whose option has no emoji (or when showEmoji is false).
+   * Omit for pickers, like Post Type, that intentionally have no per-row
+   * leading visual. */
+  fallbackIcon?: React.ReactNode;
   className?: string;
   disabled?: boolean;
 }
@@ -107,6 +117,7 @@ export function PopoverPicker(props: PopoverPickerProps) {
     triggerLabel,
     triggerIcon,
     showEmoji = true,
+    fallbackIcon,
     className = '',
     disabled = false,
   } = props;
@@ -223,21 +234,20 @@ export function PopoverPicker(props: PopoverPickerProps) {
           {!isLoading && !error && filtered.length > 0 && (
             <div className="max-h-64 overflow-y-auto space-y-1">
               {filtered.map((option) => {
-                const selected = isSelected(option);
+                const leading = showEmoji
+                  ? option.emoji
+                    ? <span className="text-base leading-none">{option.emoji}</span>
+                    : fallbackIcon
+                  : undefined;
                 return (
-                  <button
+                  <SelectorOptionRow
                     key={`${option.key}-${option.id}`}
-                    onClick={() => handleClick(option)}
-                    aria-pressed={selected}
-                    className={`w-full text-left px-3 py-2 rounded-lg transition-colors text-sm flex items-center gap-2 ${
-                      selected ? 'bg-purple-50 text-purple-900' : 'hover:bg-gray-100'
-                    }`}
-                  >
-                    {showEmoji && option.emoji && <span className="text-base">{option.emoji}</span>}
-                    <span className="flex-1">{option.label}</span>
-                    {option.category && <span className="text-xs text-gray-400">{option.category}</span>}
-                    {selected && <Check className="w-4 h-4 text-purple-600 flex-shrink-0" />}
-                  </button>
+                    leading={leading}
+                    label={option.label}
+                    description={option.category ?? undefined}
+                    selected={isSelected(option)}
+                    onSelect={() => handleClick(option)}
+                  />
                 );
               })}
             </div>

@@ -46,6 +46,9 @@ import {
   usePostCategories,
   useContentTags,
   useBackgroundStyles,
+  usePostComposerConfig,
+  FALLBACK_MAX_CAPTION_CHARACTERS,
+  FALLBACK_MAX_BACKGROUND_CAPTION_CHARACTERS,
 } from "@/lib/api/taxonomies";
 import {
   CreatePostDraft,
@@ -61,6 +64,10 @@ import {
   applyActivitySelection,
   clearFeeling,
   clearActivity,
+  isOverCaptionLimit,
+  isBackgroundEligible,
+  shouldClearBackgroundForCaptionLength,
+  shouldClearBackgroundForMedia,
   togglePetSelection,
   toggleContentTagSelection,
 } from "@/lib/create-post-rules";
@@ -212,6 +219,16 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
   const categoriesQuery = usePostCategories();
   const tagsQuery = useContentTags();
   const backgroundStylesQuery = useBackgroundStyles();
+  const composerConfigQuery = usePostComposerConfig();
+
+  // The FALLBACK_* constants are used only until this query resolves (or if
+  // it fails) — the backend-configured values always win once loaded, so an
+  // admin edit to either limit takes effect without touching this file.
+  const maxCaptionCharacters =
+    composerConfigQuery.data?.data.maxCaptionCharacters ?? FALLBACK_MAX_CAPTION_CHARACTERS;
+  const maxBackgroundCaptionCharacters =
+    composerConfigQuery.data?.data.maxBackgroundCaptionCharacters ??
+    FALLBACK_MAX_BACKGROUND_CAPTION_CHARACTERS;
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -274,15 +291,17 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
       });
 
       setDraft((prev) => {
-        // Clear background when media is added (text posts with backgrounds + media don't mix)
-        const shouldClearBackground = prev.backgroundStyle && prev.media.length === 0;
-        if (shouldClearBackground) {
-          toast("Background style cleared (media posts can't have backgrounds)");
+        // Media and a text background are mutually exclusive (§17) — adding
+        // media to a post that already has a background clears it. The
+        // caption and the newly-selected file(s) are both kept untouched.
+        const clearBackground = shouldClearBackgroundForMedia(Boolean(prev.backgroundStyle), prev.media.length);
+        if (clearBackground) {
+          toast("Text background was removed because this post now contains media.");
         }
         return {
           ...prev,
           media: [...prev.media, ...newItems],
-          backgroundStyle: shouldClearBackground ? undefined : prev.backgroundStyle,
+          backgroundStyle: clearBackground ? undefined : prev.backgroundStyle,
         };
       });
 
@@ -412,11 +431,13 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
   );
   const readyMediaCount = draft.media.filter((m) => m.status === "READY").length;
   const controlsDisabled = hasUploadingMedia || mutation.isPending;
+  const overCaptionLimit = isOverCaptionLimit(draft.caption.length, maxCaptionCharacters);
 
   const canSubmit =
     !mutation.isPending &&
     !hasUploadingMedia &&
     !hasFailedMedia &&
+    !overCaptionLimit &&
     (draft.caption.trim().length > 0 || readyMediaCount > 0);
 
   const isDraftEmpty =
@@ -564,6 +585,7 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
                 clearLabel="Clear Feeling"
                 triggerLabel="Feeling"
                 triggerIcon={<SmileIcon className="w-3.5 h-3.5" />}
+                fallbackIcon={<SmileIcon className="w-4 h-4 text-gray-400" />}
                 disabled={controlsDisabled}
               />
 
@@ -581,6 +603,7 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
                 clearLabel="Clear Activity"
                 triggerLabel="Activity"
                 triggerIcon={<Zap className="w-3.5 h-3.5" />}
+                fallbackIcon={<Zap className="w-4 h-4 text-gray-400" />}
                 disabled={controlsDisabled}
               />
 
@@ -639,7 +662,7 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
                 clearLabel="Clear Category"
                 triggerLabel="Category"
                 triggerIcon={<Grid3x3 className="w-3.5 h-3.5" />}
-                showEmoji={false}
+                fallbackIcon={<Grid3x3 className="w-4 h-4 text-gray-400" />}
                 disabled={controlsDisabled}
               />
 
@@ -661,7 +684,7 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
                 }}
                 triggerLabel="Tags"
                 triggerIcon={<Hash className="w-3.5 h-3.5" />}
-                showEmoji={false}
+                fallbackIcon={<Hash className="w-4 h-4 text-gray-400" />}
                 disabled={controlsDisabled}
               />
             </div>
@@ -672,22 +695,58 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
             {/* Caption Editor — itself the live background preview when a style is
                 selected, with Emoji inside its own bottom-right corner (never in the
                 Quick Picks row or a separate bottom toolbar). */}
-            <div className="mb-2.5">
+            <div className="mb-1">
               <CaptionEditorWithPreview
                 ref={captionRef}
                 value={draft.caption}
                 onChange={(value) => {
-                  setDraft((prev) => ({ ...prev, caption: value }));
+                  // Background eligibility auto-clear: crossing the limit
+                  // (typing OR pasting — this fires for both, since it's
+                  // the one onChange path for the controlled textarea)
+                  // while a background is selected returns the editor to
+                  // normal mode. The caption itself is never touched/
+                  // truncated — only the background selection is cleared.
+                  const crossedBackgroundLimit = shouldClearBackgroundForCaptionLength(
+                    Boolean(draft.backgroundStyle),
+                    value.length,
+                    maxBackgroundCaptionCharacters
+                  );
+                  if (crossedBackgroundLimit) {
+                    toast(
+                      `Backgrounds are available for posts up to ${maxBackgroundCaptionCharacters} characters.`
+                    );
+                  }
+                  setDraft((prev) => ({
+                    ...prev,
+                    caption: value,
+                    backgroundStyle: crossedBackgroundLimit ? undefined : prev.backgroundStyle,
+                  }));
                 }}
                 selectedBackgroundStyle={selectedBackgroundStyle}
                 isDisabled={mutation.isPending}
               />
             </div>
 
+            {/* Character counter — stays quiet for ordinary short posts;
+                only appears once the caption is within ~20% of the limit,
+                and switches to an error state at/over it (§13). */}
+            {draft.caption.length >= maxCaptionCharacters * 0.8 && (
+              <div
+                className={`text-right text-xs mb-2 ${
+                  overCaptionLimit ? "text-red-600 font-semibold" : "text-gray-400"
+                }`}
+              >
+                {draft.caption.length} / {maxCaptionCharacters}
+              </div>
+            )}
+
             {/* Background swatches — one row, database-driven, no "Background" label.
                 Immediately below the text area, above Photo/Video. Only offered for
-                eligible text posts (no media selected). */}
-            {draft.media.length === 0 && (
+                eligible text posts: no media selected, and the caption is still
+                within the background-eligible length (§14, §16) — collapses
+                entirely rather than showing a swatch that would be immediately
+                discarded. */}
+            {isBackgroundEligible(draft.media.length, draft.caption.length, maxBackgroundCaptionCharacters) && (
               <div className="mb-3">
                 <BackgroundStylesScroller
                   styles={backgroundStylesQuery.data?.data || null}

@@ -17,6 +17,20 @@ export interface TaxonomyOption {
   isActive: boolean;
 }
 
+/** Canonical Create Post composer limits — see PostComposerConfig in the
+ * backend's schema.prisma. These are the ONLY fallback values Web ever
+ * uses, and only while the config query hasn't resolved yet (or fails);
+ * once loaded, the backend's configured values always win. Kept in sync
+ * with DEFAULT_MAX_CAPTION_CHARACTERS / DEFAULT_MAX_BACKGROUND_CAPTION_CHARACTERS
+ * in the backend's taxonomy-service.ts. */
+export const FALLBACK_MAX_CAPTION_CHARACTERS = 5000;
+export const FALLBACK_MAX_BACKGROUND_CAPTION_CHARACTERS = 300;
+
+export interface PostComposerConfig {
+  maxCaptionCharacters: number;
+  maxBackgroundCaptionCharacters: number;
+}
+
 export const taxonomyKeys = {
   all: ['taxonomies'] as const,
   feelings: () => [...taxonomyKeys.all, 'feelings'] as const,
@@ -24,6 +38,7 @@ export const taxonomyKeys = {
   categories: () => [...taxonomyKeys.all, 'categories'] as const,
   tags: () => [...taxonomyKeys.all, 'tags'] as const,
   backgroundStyles: () => [...taxonomyKeys.all, 'background-styles'] as const,
+  postComposerConfig: () => [...taxonomyKeys.all, 'post-composer-config'] as const,
 };
 
 export const taxonomyApi = {
@@ -62,6 +77,10 @@ export const taxonomyApi = {
 
   getBackgroundStyles: async () => {
     return fetchApi<{ data: TaxonomyOption[] }>('/taxonomies/background-styles');
+  },
+
+  getPostComposerConfig: async () => {
+    return fetchApi<{ data: PostComposerConfig }>('/taxonomies/post-composer-config');
   },
 };
 
@@ -108,6 +127,15 @@ export function useBackgroundStyles(): UseQueryResult<{ data: TaxonomyOption[] }
     queryKey: taxonomyKeys.backgroundStyles(),
     queryFn: () => taxonomyApi.getBackgroundStyles(),
     staleTime: 60 * 60 * 1000, // 1 hour - less frequently changing
+    retry: 1,
+  });
+}
+
+export function usePostComposerConfig(): UseQueryResult<{ data: PostComposerConfig }, Error> {
+  return useQuery({
+    queryKey: taxonomyKeys.postComposerConfig(),
+    queryFn: () => taxonomyApi.getPostComposerConfig(),
+    staleTime: 60 * 60 * 1000, // 1 hour - admin-editable but rarely changes
     retry: 1,
   });
 }

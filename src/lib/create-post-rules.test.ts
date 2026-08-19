@@ -7,6 +7,10 @@ import {
   applyActivitySelection,
   clearFeeling,
   clearActivity,
+  isOverCaptionLimit,
+  isBackgroundEligible,
+  shouldClearBackgroundForCaptionLength,
+  shouldClearBackgroundForMedia,
   togglePetSelection,
   toggleContentTagSelection,
   type FeelingActivityFields,
@@ -178,6 +182,78 @@ describe("applyFeelingSelection / applyActivitySelection / clearFeeling / clearA
     const result = applyActivitySelection(draft, { key: "walking", label: "Walking" });
     assert.strictEqual(draft.feelingId, "happy");
     assert.notStrictEqual(result, draft);
+  });
+});
+
+describe("isOverCaptionLimit (§29)", () => {
+  it("accepts a caption below the maximum", () => {
+    assert.strictEqual(isOverCaptionLimit(100, 5000), false);
+  });
+
+  it("accepts a caption exactly at the maximum", () => {
+    assert.strictEqual(isOverCaptionLimit(5000, 5000), false);
+  });
+
+  it("rejects a caption one character over the maximum", () => {
+    assert.strictEqual(isOverCaptionLimit(5001, 5000), true);
+  });
+});
+
+describe("isBackgroundEligible (§14, §16, §30)", () => {
+  it("eligible: no media, caption below the background limit", () => {
+    assert.strictEqual(isBackgroundEligible(0, 200, 300), true);
+  });
+
+  it("eligible: no media, caption exactly at the background limit", () => {
+    assert.strictEqual(isBackgroundEligible(0, 300, 300), true);
+  });
+
+  it("not eligible: no media, caption one character over the background limit", () => {
+    assert.strictEqual(isBackgroundEligible(0, 301, 300), false);
+  });
+
+  it("not eligible: caption within the background limit but media is attached", () => {
+    assert.strictEqual(isBackgroundEligible(1, 50, 300), false);
+  });
+
+  it("not eligible: both media attached AND caption over the background limit", () => {
+    assert.strictEqual(isBackgroundEligible(2, 500, 300), false);
+  });
+});
+
+describe("shouldClearBackgroundForCaptionLength (§15, §30)", () => {
+  it("clears when a background is selected and the new length crosses the limit", () => {
+    assert.strictEqual(shouldClearBackgroundForCaptionLength(true, 301, 300), true);
+  });
+
+  it("does not clear when the new length is still within the limit", () => {
+    assert.strictEqual(shouldClearBackgroundForCaptionLength(true, 300, 300), false);
+  });
+
+  it("does not clear when no background is selected, even if over the limit (nothing to clear)", () => {
+    assert.strictEqual(shouldClearBackgroundForCaptionLength(false, 301, 300), false);
+  });
+
+  it("does not clear existing caption content — this function only ever decides the background field", () => {
+    // Documented by the return type itself (boolean, not a caption
+    // transform) — this test exists to make that contract explicit and
+    // catch a future accidental signature change.
+    const result = shouldClearBackgroundForCaptionLength(true, 5000, 300);
+    assert.strictEqual(typeof result, "boolean");
+  });
+});
+
+describe("shouldClearBackgroundForMedia (§17, §18, §31)", () => {
+  it("clears the background when media is added to a previously media-less, backgrounded draft", () => {
+    assert.strictEqual(shouldClearBackgroundForMedia(true, 0), true);
+  });
+
+  it("does not clear when there was no background selected", () => {
+    assert.strictEqual(shouldClearBackgroundForMedia(false, 0), false);
+  });
+
+  it("does not re-fire once the draft already had media before this addition (background was already cleared on the first crossing)", () => {
+    assert.strictEqual(shouldClearBackgroundForMedia(true, 1), false);
   });
 });
 

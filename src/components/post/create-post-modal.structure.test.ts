@@ -171,6 +171,25 @@ describe("CaptionEditorWithPreview — bordered field + embedded Emoji", () => {
   it("the textarea has an accessible label", () => {
     assert.ok(editorSource.includes('aria-label="Post caption"'));
   });
+
+  it("SCROLL FIX §9-10: never sets a permanent static overflow: 'hidden' on the textarea (the original bug — a static JSX style prop wins over adjustHeight's imperative fix once content exceeds max height)", () => {
+    // Match only an actual JSX style-object property, not this test file's
+    // own prose describing the bug (which necessarily contains the same
+    // literal substring).
+    assert.ok(!/style=\{\{[^}]*overflow:\s*['"]hidden['"]/.test(editorSource));
+  });
+
+  it("owns overflowY imperatively via the same code path that owns height, using the shared computeAutoGrowHeight rule", () => {
+    assert.ok(editorSource.includes("el.style.overflowY"));
+    assert.ok(editorSource.includes("computeAutoGrowHeight"));
+    assert.ok(editorSource.includes("from '@/lib/textarea-autogrow'"));
+  });
+
+  it("does not attach a custom wheel/scroll event handler — native textarea scrolling is relied on once overflow is fixed (§10)", () => {
+    assert.ok(!editorSource.includes("onWheel"));
+    assert.ok(!editorSource.includes("addEventListener('wheel'"));
+    assert.ok(!editorSource.includes('addEventListener("wheel"'));
+  });
 });
 
 describe("EmojiPopover — accessible name and no duplicate control", () => {
@@ -347,5 +366,150 @@ describe("CreatePostModal — metadata selectors are single static instances (§
     const toolbarEnd = modalSource.indexOf("{/* Text area, exactly as specified", toolbarStart);
     const toolbarSection = modalSource.slice(toolbarStart, toolbarEnd);
     assert.ok(!/\bkey=\{/.test(toolbarSection));
+  });
+});
+
+/**
+ * SELECTOR ICONS — every open-popup option row has its visual identity on
+ * the left (§27). Post Type/General is explicitly excluded per §25 (user
+ * confirmed it's already correct). Same source-text-assertion rationale
+ * as the rest of this file: no jsdom/RTL harness to actually open a
+ * popover and inspect a rendered row.
+ */
+describe("Selector option rows have a left-side visual (§1-8, §27)", () => {
+  const pickerSource = readFileSync(join(__dirname, "..", "ui", "popover-picker.tsx"), "utf-8");
+  const petSource = readFileSync(join(__dirname, "pet-tag-popover.tsx"), "utf-8");
+  const locationSource = readFileSync(join(__dirname, "location-popover.tsx"), "utf-8");
+  const optionRowSource = readFileSync(join(__dirname, "..", "ui", "selector-option-row.tsx"), "utf-8");
+
+  it("PopoverPicker renders each row through the shared SelectorOptionRow, passing a leading visual", () => {
+    assert.ok(pickerSource.includes("import { SelectorOptionRow }"));
+    assert.ok(pickerSource.includes("<SelectorOptionRow"));
+    assert.ok(pickerSource.includes("leading={leading}"));
+  });
+
+  it("PopoverPicker's leading visual prefers the option's own emoji and falls back to a domain fallbackIcon when absent", () => {
+    assert.ok(pickerSource.includes("option.emoji"));
+    assert.ok(pickerSource.includes("fallbackIcon"));
+  });
+
+  // Fixed-length window rather than searching for the next "/>", since a
+  // prop like `triggerIcon={<SmileIcon ... />}` contains its own nested
+  // self-closing "/>" that appears before the outer element's real closing
+  // tag — naively searching for "/>" matches that inner one instead.
+  const BLOCK_WINDOW = 1400;
+
+  it("Feeling and Activity pickers pass a fallbackIcon for the defensive missing-emoji case (§2, §3)", () => {
+    const feelingStart = modalSource.indexOf("feelingsQuery.data");
+    const activityStart = modalSource.indexOf("activitiesQuery.data");
+    const feelingBlock = modalSource.slice(feelingStart, feelingStart + BLOCK_WINDOW);
+    const activityBlock = modalSource.slice(activityStart, activityStart + BLOCK_WINDOW);
+    assert.ok(feelingBlock.includes("fallbackIcon"));
+    assert.ok(activityBlock.includes("fallbackIcon"));
+  });
+
+  it("Category and Tags pickers no longer force showEmoji={false} with no fallback — each now has a stable fallbackIcon (§6, §7)", () => {
+    const categoryStart = modalSource.indexOf("categoriesQuery.data");
+    const tagsStart = modalSource.lastIndexOf("multiSelect");
+    const categoryBlock = modalSource.slice(categoryStart, categoryStart + BLOCK_WINDOW);
+    const tagsBlock = modalSource.slice(tagsStart, tagsStart + BLOCK_WINDOW);
+    assert.ok(categoryBlock.includes("fallbackIcon"));
+    assert.ok(tagsBlock.includes("fallbackIcon"));
+  });
+
+  it("Pet popup rows use SelectorOptionRow with an Avatar leading visual and a paw-icon fallback, not the pet's initial letter (§4)", () => {
+    assert.ok(petSource.includes("SelectorOptionRow"));
+    assert.ok(petSource.includes("<Avatar"));
+    assert.ok(petSource.includes("<AvatarFallback"));
+    assert.ok(petSource.includes("<PawPrint"));
+    assert.ok(!/AvatarFallback[^>]*>\s*\{pet\.name\.charAt/.test(petSource));
+  });
+
+  it("Pet popup rows show a species/breed description line when available", () => {
+    assert.ok(petSource.includes("description="));
+  });
+
+  it("Location popup's text input has a left-side MapPin icon (§5)", () => {
+    const inputBlock = locationSource.slice(
+      locationSource.indexOf("<label"),
+      locationSource.indexOf("</form>"),
+    );
+    const mapPinMatches = inputBlock.match(/<MapPin/g) || [];
+    assert.ok(mapPinMatches.length >= 1);
+  });
+
+  it("the shared SelectorOptionRow supports emoji/icon/avatar leading content plus an optional description and trailing override", () => {
+    assert.ok(optionRowSource.includes("leading"));
+    assert.ok(optionRowSource.includes("description"));
+    assert.ok(optionRowSource.includes("trailing"));
+  });
+
+  it("the closed trigger still contains the selected visual + label after selection (Feeling/Activity keep their icon+label trigger)", () => {
+    assert.ok(modalSource.includes('triggerIcon={<SmileIcon className="w-3.5 h-3.5" />}'));
+    assert.ok(modalSource.includes('triggerIcon={<Zap className="w-3.5 h-3.5" />}'));
+  });
+});
+
+/**
+ * TEXT LIMIT + BACKGROUND ELIGIBILITY + MEDIA/BACKGROUND EXCLUSIVITY —
+ * proves the modal wires the pure decision rules from create-post-rules.ts
+ * (already unit-tested for correctness there) rather than reimplementing
+ * the same logic inline and untested a second time.
+ */
+describe("Text limit, background eligibility, and media/background exclusivity are wired from create-post-rules.ts (§11-21, §27ff)", () => {
+  it("imports and uses isOverCaptionLimit to gate submission, not an inline re-derivation", () => {
+    assert.ok(modalSource.includes("isOverCaptionLimit,"));
+    assert.ok(modalSource.includes("isOverCaptionLimit(draft.caption.length, maxCaptionCharacters)"));
+    assert.ok(modalSource.includes("!overCaptionLimit"));
+  });
+
+  it("imports and uses isBackgroundEligible to gate the background swatch row's visibility", () => {
+    assert.ok(modalSource.includes("isBackgroundEligible,"));
+    assert.ok(
+      modalSource.includes(
+        "isBackgroundEligible(draft.media.length, draft.caption.length, maxBackgroundCaptionCharacters)",
+      ),
+    );
+  });
+
+  it("imports and uses shouldClearBackgroundForCaptionLength inside the caption onChange handler", () => {
+    assert.ok(modalSource.includes("shouldClearBackgroundForCaptionLength,"));
+    assert.ok(modalSource.includes("shouldClearBackgroundForCaptionLength("));
+  });
+
+  it("imports and uses shouldClearBackgroundForMedia inside the media-select handler", () => {
+    assert.ok(modalSource.includes("shouldClearBackgroundForMedia,"));
+    assert.ok(modalSource.includes("shouldClearBackgroundForMedia("));
+  });
+
+  it("caption text itself is never truncated by the background-eligibility auto-clear (only backgroundStyle is conditionally cleared)", () => {
+    const onChangeStart = modalSource.indexOf("onChange={(value) => {", modalSource.indexOf("<CaptionEditorWithPreview"));
+    const onChangeEnd = modalSource.indexOf("}}", onChangeStart);
+    const onChangeBlock = modalSource.slice(onChangeStart, onChangeEnd);
+    assert.ok(onChangeBlock.includes("caption: value"));
+    assert.ok(!onChangeBlock.includes("value.slice"));
+    assert.ok(!onChangeBlock.includes("value.substring"));
+  });
+
+  it("fetches the composer config from the backend and falls back to the shared FALLBACK_* constants, not separately-hardcoded numbers", () => {
+    assert.ok(modalSource.includes("usePostComposerConfig"));
+    assert.ok(modalSource.includes("FALLBACK_MAX_CAPTION_CHARACTERS"));
+    assert.ok(modalSource.includes("FALLBACK_MAX_BACKGROUND_CAPTION_CHARACTERS"));
+    // No bare numeric literal 5000 or 300 standing in for the config
+    // anywhere outside the two fallback-constant usages themselves.
+    assert.ok(!/maxCaptionCharacters\s*=\s*5000/.test(modalSource));
+    assert.ok(!/maxBackgroundCaptionCharacters\s*=\s*300/.test(modalSource));
+  });
+
+  it("shows a character counter only near the limit, with an error state at/over it", () => {
+    assert.ok(modalSource.includes("maxCaptionCharacters * 0.8"));
+    assert.ok(modalSource.includes("text-red-600"));
+  });
+
+  it("the media-select and caption-onChange toasts use the exact wording from the spec", () => {
+    assert.ok(
+      modalSource.includes("Text background was removed because this post now contains media."),
+    );
+    assert.ok(modalSource.includes("Backgrounds are available for posts up to ${maxBackgroundCaptionCharacters} characters."));
   });
 });

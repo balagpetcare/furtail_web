@@ -87,6 +87,59 @@ export function clearActivity<T extends FeelingActivityFields>(draft: T): T {
   };
 }
 
+// ── Text limit + background/media exclusivity (SELECTOR ICONS + TEXT
+// SCROLL + TEXT LIMIT + BACKGROUND/MEDIA EXCLUSIVITY) ───────────────────
+// Pure decision rules for the composer's caption-length and background-
+// eligibility policy, extracted so they're unit-testable without a
+// component harness (this project has none — see the interaction test
+// files' own doc comments) and so create-post-modal.tsx has exactly one
+// place each rule is expressed, not an inline duplicate.
+
+/** The overall caption cap has been exceeded — submission must be
+ * blocked (canSubmit), and the counter should show its error state. */
+export function isOverCaptionLimit(captionLength: number, maxCaptionCharacters: number): boolean {
+  return captionLength > maxCaptionCharacters;
+}
+
+/** A background is only offered while the post has no media AND the
+ * caption is still within the (typically much smaller) background-
+ * eligible length — a background is a short-status-post feature, and it
+ * would be immediately discarded on submit outside this window. */
+export function isBackgroundEligible(
+  mediaCount: number,
+  captionLength: number,
+  maxBackgroundCaptionCharacters: number,
+): boolean {
+  return mediaCount === 0 && captionLength <= maxBackgroundCaptionCharacters;
+}
+
+/** Typing or pasting has pushed the caption past the background-eligible
+ * length while a background is currently selected — the background must
+ * be cleared (caption text itself is never touched). True only when both
+ * a background is actually selected AND the new length crosses the line;
+ * merely being over the limit with no background selected is a no-op. */
+export function shouldClearBackgroundForCaptionLength(
+  hasBackgroundSelected: boolean,
+  newCaptionLength: number,
+  maxBackgroundCaptionCharacters: number,
+): boolean {
+  return hasBackgroundSelected && newCaptionLength > maxBackgroundCaptionCharacters;
+}
+
+/** Media is being attached to a draft that previously had none, while a
+ * background is currently selected — media and a text background are
+ * mutually exclusive (§17), so the background must be cleared. Keyed off
+ * "previously had none" (not "will have some") because once a draft has
+ * any media, the background swatches are already hidden entirely
+ * (isBackgroundEligible), so this transition only needs to fire once, on
+ * the 0 -> N crossing. */
+export function shouldClearBackgroundForMedia(
+  hasBackgroundSelected: boolean,
+  mediaCountBeforeAdd: number,
+): boolean {
+  return hasBackgroundSelected && mediaCountBeforeAdd === 0;
+}
+
 export function togglePetSelection(taggedPetIds: number[], petId: number): number[] {
   return taggedPetIds.includes(petId)
     ? taggedPetIds.filter((id) => id !== petId)

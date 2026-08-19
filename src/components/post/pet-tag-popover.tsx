@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { PawPrint, Search } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { SELECTOR_TRIGGER_CLASS, SelectorTriggerContent } from '@/components/ui/popover-picker';
+import { SelectorOptionRow } from '@/components/ui/selector-option-row';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { getMediaUrl } from '@/lib/media';
 import { summarizeMultiSelectLabel } from '@/lib/selector-display';
@@ -76,36 +77,33 @@ export function PetTagPopover({ pets, selectedPetIds, onToggle, disabled = false
                 const petIdNum = Number(pet.id);
                 const selected = selectedPetIds.includes(petIdNum);
                 return (
-                  <button
+                  <SelectorOptionRow
                     key={pet.id}
-                    onClick={() => onToggle(petIdNum)}
-                    aria-pressed={selected}
-                    className={`w-full text-left px-2 py-2 rounded-lg transition-colors text-sm flex items-center gap-2.5 ${
-                      selected ? 'bg-purple-50 text-purple-900' : 'hover:bg-gray-100'
-                    }`}
-                  >
-                    <Avatar className="w-8 h-8 flex-shrink-0">
-                      <AvatarImage src={getMediaUrl(pet.avatarUrl)} alt={pet.name} />
-                      <AvatarFallback className="bg-purple-100 text-purple-700 text-xs font-semibold">
-                        {pet.name.charAt(0).toUpperCase()}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium truncate">{pet.name}</div>
-                      {(pet.species || pet.breed) && (
-                        <div className="text-xs text-gray-500 truncate">
-                          {[pet.species, pet.breed].filter(Boolean).join(' • ')}
-                        </div>
-                      )}
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={selected}
-                      onChange={() => {}}
-                      className="w-4 h-4 flex-shrink-0"
-                      tabIndex={-1}
-                    />
-                  </button>
+                    leading={
+                      <Avatar className="w-8 h-8">
+                        <AvatarImage src={getMediaUrl(pet.avatarUrl)} alt={pet.name} />
+                        {/* Fallback is a paw icon, not the pet's initial letter —
+                            a photo-less pet still gets a meaningful, on-brand
+                            left-side visual instead of a bare letter. */}
+                        <AvatarFallback className="bg-purple-100 text-purple-500">
+                          <PawPrint className="w-4 h-4" />
+                        </AvatarFallback>
+                      </Avatar>
+                    }
+                    label={pet.name}
+                    description={[pet.species, pet.breed].filter(Boolean).join(' • ') || undefined}
+                    selected={selected}
+                    onSelect={() => onToggle(petIdNum)}
+                    trailing={
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => {}}
+                        className="w-4 h-4 flex-shrink-0"
+                        tabIndex={-1}
+                      />
+                    }
+                  />
                 );
               })}
             </div>
