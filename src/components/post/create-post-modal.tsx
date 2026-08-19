@@ -26,6 +26,11 @@ import {
   SmileIcon,
   Zap,
   FileText,
+  HeartPulse,
+  Syringe,
+  AlertTriangle,
+  Home,
+  Star,
   Grid3x3,
   Hash,
   ChevronDown,
@@ -54,10 +59,12 @@ import {
   isValidPostCategoryKey,
   applyFeelingSelection,
   applyActivitySelection,
+  clearFeeling,
+  clearActivity,
   togglePetSelection,
   toggleContentTagSelection,
 } from "@/lib/create-post-rules";
-import { PopoverPicker, SelectedChip, QUICK_PICK_TRIGGER_CLASS, type PickerOption } from "@/components/ui/popover-picker";
+import { PopoverPicker, QUICK_PICK_TRIGGER_CLASS, type PickerOption } from "@/components/ui/popover-picker";
 import { PetTagPopover } from "@/components/post/pet-tag-popover";
 import { LocationPopover } from "@/components/post/location-popover";
 import { BackgroundStylesScroller } from "@/components/post/background-styles-scroller";
@@ -83,6 +90,18 @@ const POST_TYPE_OPTIONS: PickerOption[] = POST_TYPES.map((pt, i) => ({
   sortOrder: i,
   isActive: true,
 }));
+
+/** Post Type's trigger icon changes with the selection (e.g. a distinct
+ * alert icon for Lost Pet) — every other selector keeps one static icon
+ * and only its label changes. */
+const POST_TYPE_ICONS: Record<string, React.ReactNode> = {
+  GENERAL: <FileText className="w-3.5 h-3.5" />,
+  HEALTH_UPDATE: <HeartPulse className="w-3.5 h-3.5" />,
+  VACCINATION: <Syringe className="w-3.5 h-3.5" />,
+  LOST_PET: <AlertTriangle className="w-3.5 h-3.5" />,
+  ADOPTION: <Home className="w-3.5 h-3.5" />,
+  SERVICE_REVIEW: <Star className="w-3.5 h-3.5" />,
+};
 
 interface UploadedMediaResult {
   serverMediaId: number;
@@ -419,16 +438,7 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
     ? backgroundStylesQuery.data?.data?.find((s) => s.key === draft.backgroundStyle)
     : undefined;
 
-  const selectedPets = (userPets || []).filter((pet) => draft.taggedPetIds.includes(Number(pet.id)));
   const selectedTags = (tagsQuery.data?.data || []).filter((tag) => draft.contentTagIds.includes(tag.id));
-
-  const hasSelectedMetadata =
-    Boolean(draft.feelingId) ||
-    Boolean(draft.activityId) ||
-    selectedPets.length > 0 ||
-    Boolean(draft.locationText) ||
-    Boolean(draft.category) ||
-    selectedTags.length > 0;
 
   return (
     <>
@@ -515,54 +525,67 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
               </div>
             </div>
 
-            {/* ── ONE Quick Picks row — every action lives here, nothing duplicated below ── */}
+            {/* ── ONE Quick Picks row — every metadata selector lives here and
+                relabels itself in place on selection (same closed-trigger
+                family as the Public selector above). No separate removable
+                chip row underneath: the selector IS the state indicator.
+                Wraps cleanly on narrow widths instead of scrolling. ── */}
             <div
-              className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide pb-1 mb-3"
+              className="flex flex-wrap items-center gap-1.5 mb-3"
               role="toolbar"
               aria-label="Post options"
             >
-              {/* Post Type — own chip relabels itself on selection (not a removable chip) */}
+              {/* Post Type — trigger icon AND label both change with selection */}
               <PopoverPicker
                 options={POST_TYPE_OPTIONS}
                 isLoading={false}
+                selectedKey={draft.postType}
                 onSelect={(option) => {
                   setDraft((prev) => ({ ...prev, postType: option.key }));
                 }}
                 triggerLabel={postTypeLabel}
-                triggerIcon={<FileText className="w-3.5 h-3.5" />}
+                triggerIcon={POST_TYPE_ICONS[draft.postType] || <FileText className="w-3.5 h-3.5" />}
                 showEmoji={false}
                 disabled={controlsDisabled}
               />
 
-              {/* Feeling — database-driven, mutually exclusive with Activity */}
+              {/* Feeling — database-driven. Independent of Activity: selecting,
+                  changing, or clearing one never touches the other. */}
               <PopoverPicker
                 options={feelingsQuery.data?.data || null}
                 isLoading={feelingsQuery.isLoading}
                 error={feelingsQuery.error ? "Unable to load feelings" : undefined}
                 onRetry={() => feelingsQuery.refetch()}
+                selectedKey={draft.feelingId}
                 onSelect={(option) => {
                   setDraft((prev) => applyFeelingSelection(prev, option));
                 }}
+                onClear={() => setDraft((prev) => clearFeeling(prev))}
+                clearLabel="Clear Feeling"
                 triggerLabel="Feeling"
                 triggerIcon={<SmileIcon className="w-3.5 h-3.5" />}
                 disabled={controlsDisabled}
               />
 
-              {/* Activity — database-driven, mutually exclusive with Feeling */}
+              {/* Activity — database-driven. Independent of Feeling — see above. */}
               <PopoverPicker
                 options={activitiesQuery.data?.data || null}
                 isLoading={activitiesQuery.isLoading}
                 error={activitiesQuery.error ? "Unable to load activities" : undefined}
                 onRetry={() => activitiesQuery.refetch()}
+                selectedKey={draft.activityId}
                 onSelect={(option) => {
                   setDraft((prev) => applyActivitySelection(prev, option));
                 }}
+                onClear={() => setDraft((prev) => clearActivity(prev))}
+                clearLabel="Clear Activity"
                 triggerLabel="Activity"
                 triggerIcon={<Zap className="w-3.5 h-3.5" />}
                 disabled={controlsDisabled}
               />
 
-              {/* Tag Pet — authenticated user's actual pet registry, multi-select */}
+              {/* Tag Pet — authenticated user's actual pet registry, multi-select.
+                  Trigger summarizes ("Bruno", "Bruno +2"); no chip row. */}
               {userPets && userPets.length > 0 && (
                 <PetTagPopover
                   pets={userPets}
@@ -577,7 +600,8 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
                 />
               )}
 
-              {/* Location — small popup, no permanent full-width field */}
+              {/* Location — small popup, no permanent full-width field. Trigger
+                  shows the saved value once set; edit/clear by reopening. */}
               <LocationPopover
                 value={draft.locationText}
                 onSave={(locationText) => {
@@ -587,12 +611,17 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
               />
 
               {/* Category — database-backed PostCategoryTaxonomy; only entries that
-                  round-trip onto the stable Post.category enum are accepted. */}
+                  round-trip onto the stable Post.category enum are accepted.
+                  selectedLabel prefers the cached label over re-deriving it
+                  from `options`, since Post.category is stored uppercase while
+                  taxonomy keys are lowercase. */}
               <PopoverPicker
                 options={categoriesQuery.data?.data || null}
                 isLoading={categoriesQuery.isLoading}
                 error={categoriesQuery.error ? "Unable to load categories" : undefined}
                 onRetry={() => categoriesQuery.refetch()}
+                selectedKey={draft.category ? draft.category.toLowerCase() : undefined}
+                selectedLabel={draft.categoryLabel}
                 onSelect={(option) => {
                   if (!isValidPostCategoryKey(option.key)) {
                     toast.error(`"${option.label}" can't be applied to a post yet`);
@@ -604,13 +633,19 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
                     categoryLabel: option.label,
                   }));
                 }}
+                onClear={() =>
+                  setDraft((prev) => ({ ...prev, category: undefined, categoryLabel: undefined }))
+                }
+                clearLabel="Clear Category"
                 triggerLabel="Category"
                 triggerIcon={<Grid3x3 className="w-3.5 h-3.5" />}
                 showEmoji={false}
                 disabled={controlsDisabled}
               />
 
-              {/* Tags — database-backed ContentTag, multi-select (distinct from Pet tagging) */}
+              {/* Tags — database-backed ContentTag, multi-select (distinct from Pet
+                  tagging). Trigger summarizes ("Dogs", "Dogs +2"); individual
+                  removal happens by toggling the tag off inside the popover. */}
               <PopoverPicker
                 multiSelect
                 options={tagsQuery.data?.data || null}
@@ -630,82 +665,6 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
                 disabled={controlsDisabled}
               />
             </div>
-
-            {/* Selected metadata — one consistent chip design, only what's actually
-                selected. Kept next to the Quick Picks row (profile/metadata area),
-                never pushed down into the media section below. */}
-            {hasSelectedMetadata && (
-              <div className="flex flex-wrap gap-2 mb-3">
-                {draft.feelingId && (
-                  <SelectedChip
-                    label={draft.feelingLabel || ""}
-                    emoji={draft.feelingEmoji}
-                    onRemove={() =>
-                      setDraft((prev) => ({
-                        ...prev,
-                        feelingId: undefined,
-                        feelingLabel: undefined,
-                        feelingEmoji: undefined,
-                      }))
-                    }
-                  />
-                )}
-                {draft.activityId && (
-                  <SelectedChip
-                    label={draft.activityLabel || ""}
-                    emoji={draft.activityEmoji}
-                    onRemove={() =>
-                      setDraft((prev) => ({
-                        ...prev,
-                        activityId: undefined,
-                        activityLabel: undefined,
-                        activityEmoji: undefined,
-                      }))
-                    }
-                  />
-                )}
-                {selectedPets.map((pet) => (
-                  <SelectedChip
-                    key={pet.id}
-                    label={pet.name}
-                    emoji="🐾"
-                    onRemove={() =>
-                      setDraft((prev) => ({
-                        ...prev,
-                        taggedPetIds: prev.taggedPetIds.filter((id) => id !== Number(pet.id)),
-                      }))
-                    }
-                  />
-                ))}
-                {draft.locationText && (
-                  <SelectedChip
-                    label={draft.locationText}
-                    emoji="📍"
-                    onRemove={() => setDraft((prev) => ({ ...prev, locationText: undefined }))}
-                  />
-                )}
-                {draft.category && (
-                  <SelectedChip
-                    label={draft.categoryLabel || draft.category}
-                    onRemove={() =>
-                      setDraft((prev) => ({ ...prev, category: undefined, categoryLabel: undefined }))
-                    }
-                  />
-                )}
-                {selectedTags.map((tag) => (
-                  <SelectedChip
-                    key={tag.id}
-                    label={`#${tag.label}`}
-                    onRemove={() =>
-                      setDraft((prev) => ({
-                        ...prev,
-                        contentTagIds: prev.contentTagIds.filter((id) => id !== tag.id),
-                      }))
-                    }
-                  />
-                ))}
-              </div>
-            )}
 
             {/* ── Text area, exactly as specified: TEXT AREA -> BACKGROUND ROW ->
                 PHOTO/VIDEO -> MEDIA PREVIEW ── */}

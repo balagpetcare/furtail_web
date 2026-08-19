@@ -3,9 +3,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { PawPrint, Search } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { QUICK_PICK_TRIGGER_CLASS } from '@/components/ui/popover-picker';
+import { SELECTOR_TRIGGER_CLASS, SelectorTriggerContent } from '@/components/ui/popover-picker';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { getMediaUrl } from '@/lib/media';
+import { summarizeMultiSelectLabel } from '@/lib/selector-display';
 import type { Pet } from '@/lib/api/pets';
 
 interface PetTagPopoverProps {
@@ -40,11 +41,16 @@ export function PetTagPopover({ pets, selectedPetIds, onToggle, disabled = false
     );
   });
 
+  const selectedPets = pets.filter((pet) => selectedPetIds.includes(Number(pet.id)));
+  const display = summarizeMultiSelectLabel(
+    selectedPets.map((pet) => ({ label: pet.name })),
+    'Pet',
+  );
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger disabled={disabled} className={QUICK_PICK_TRIGGER_CLASS} aria-label="Tag Pet">
-        <PawPrint className="w-3.5 h-3.5" />
-        <span>Pet</span>
+      <PopoverTrigger disabled={disabled} className={SELECTOR_TRIGGER_CLASS} aria-label="Tag Pet">
+        <SelectorTriggerContent icon={<PawPrint className="w-3.5 h-3.5" />} label={display.label} />
       </PopoverTrigger>
       <PopoverContent className="w-72 p-0">
         <div className="space-y-2 p-3">

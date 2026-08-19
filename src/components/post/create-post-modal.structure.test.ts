@@ -184,3 +184,168 @@ describe("EmojiPopover — accessible name and no duplicate control", () => {
     assert.ok(emojiSource.includes("compact"));
   });
 });
+
+/**
+ * SELECTOR UX UNIFICATION — source-level guards for the removed × chip row
+ * and the new selected-state wiring on each metadata selector. Same
+ * rationale as the block comment at the top of this file: no jsdom/RTL
+ * configured, so these assert against source text rather than a rendered
+ * DOM. Pure Feeling/Activity coexistence logic itself is unit-tested with
+ * real assertions (not source text) in create-post-rules.test.ts, and the
+ * trigger-label computation itself in selector-display.test.ts — this file
+ * only proves those functions/props are actually wired into the modal.
+ */
+describe("CreatePostModal — old × selected-metadata chip row is fully removed (§12)", () => {
+  it("does not import or render SelectedChip anywhere", () => {
+    assert.ok(!modalSource.includes("SelectedChip"));
+  });
+
+  it("does not contain the old 'Selected metadata' chip-row comment block", () => {
+    assert.ok(!modalSource.includes("Selected metadata — one consistent chip design"));
+  });
+
+  it("does not render a Remove-aria-label pattern for feeling/activity/pet/location/tag chips", () => {
+    assert.ok(!modalSource.includes("Remove ${"));
+  });
+});
+
+describe("CreatePostModal — metadata selectors relabel themselves in place (§3-11)", () => {
+  it("Post Type selector receives selectedKey and a selection-dependent icon (§3)", () => {
+    const start = modalSource.indexOf("POST_TYPE_OPTIONS}");
+    const end = modalSource.indexOf("/>", start);
+    const block = modalSource.slice(start, end);
+    assert.ok(block.includes("selectedKey={draft.postType}"));
+    assert.ok(block.includes("POST_TYPE_ICONS[draft.postType]"));
+  });
+
+  it("Feeling selector receives selectedKey and an onClear (§4)", () => {
+    const start = modalSource.indexOf("feelingsQuery.data");
+    const end = modalSource.indexOf("/>", start);
+    const block = modalSource.slice(start, end);
+    assert.ok(block.includes("selectedKey={draft.feelingId}"));
+    assert.ok(block.includes("onClear={"));
+    assert.ok(block.includes("clearFeeling"));
+  });
+
+  it("Activity selector receives selectedKey and an onClear (§5)", () => {
+    const start = modalSource.indexOf("activitiesQuery.data");
+    const end = modalSource.indexOf("/>", start);
+    const block = modalSource.slice(start, end);
+    assert.ok(block.includes("selectedKey={draft.activityId}"));
+    assert.ok(block.includes("onClear={"));
+    assert.ok(block.includes("clearActivity"));
+  });
+
+  it("Category selector receives selectedKey + selectedLabel and an onClear (§10)", () => {
+    const start = modalSource.indexOf("categoriesQuery.data");
+    const end = modalSource.indexOf("<PopoverPicker", modalSource.indexOf("multiSelect"));
+    const block = modalSource.slice(start, end);
+    assert.ok(block.includes("selectedKey={draft.category"));
+    assert.ok(block.includes("selectedLabel={draft.categoryLabel}"));
+    assert.ok(block.includes("onClear={"));
+  });
+
+  it("Tags selector is multi-select with selectedKeys wired for trigger summarization (§11)", () => {
+    const start = modalSource.lastIndexOf("multiSelect");
+    const end = modalSource.indexOf("/>", start);
+    const block = modalSource.slice(start, end);
+    assert.ok(block.includes("selectedKeys={selectedTags.map"));
+  });
+
+  it("Pet selector (PetTagPopover) summarizes its own selection via summarizeMultiSelectLabel (§8)", () => {
+    const petSource = readFileSync(join(__dirname, "pet-tag-popover.tsx"), "utf-8");
+    assert.ok(petSource.includes("summarizeMultiSelectLabel"));
+    assert.ok(!petSource.includes("SelectedChip"));
+  });
+
+  it("Location selector (LocationPopover) displays the saved value on its trigger (§9)", () => {
+    const locationSource = readFileSync(join(__dirname, "location-popover.tsx"), "utf-8");
+    assert.ok(locationSource.includes("label={value || 'Location'}"));
+    assert.ok(!locationSource.includes("SelectedChip"));
+  });
+
+  it("PopoverPicker's multi-select trigger uses the shared summarization helper, not a bespoke implementation", () => {
+    const pickerSource = readFileSync(
+      join(__dirname, "..", "ui", "popover-picker.tsx"),
+      "utf-8",
+    );
+    assert.ok(pickerSource.includes("summarizeMultiSelectLabel"));
+    assert.ok(pickerSource.includes("computeSingleSelectDisplay"));
+  });
+});
+
+describe("CreatePostModal — Public-style shared trigger family (§1, §14)", () => {
+  it("every metadata selector renders via the shared SELECTOR_TRIGGER_CLASS / SelectorTriggerContent, not one-off markup", () => {
+    const pickerSource = readFileSync(
+      join(__dirname, "..", "ui", "popover-picker.tsx"),
+      "utf-8",
+    );
+    assert.ok(pickerSource.includes("export const SELECTOR_TRIGGER_CLASS"));
+    assert.ok(pickerSource.includes("export function SelectorTriggerContent"));
+    const petSource = readFileSync(join(__dirname, "pet-tag-popover.tsx"), "utf-8");
+    const locationSource = readFileSync(join(__dirname, "location-popover.tsx"), "utf-8");
+    assert.ok(petSource.includes("SELECTOR_TRIGGER_CLASS"));
+    assert.ok(petSource.includes("SelectorTriggerContent"));
+    assert.ok(locationSource.includes("SELECTOR_TRIGGER_CLASS"));
+    assert.ok(locationSource.includes("SelectorTriggerContent"));
+  });
+
+  it("Photo/Video action buttons keep their own distinct style (QUICK_PICK_TRIGGER_CLASS), unaffected by the selector unification", () => {
+    assert.ok(modalSource.includes("QUICK_PICK_TRIGGER_CLASS"));
+  });
+});
+
+describe("CreatePostModal — Quick Picks row wraps instead of scrolling on desktop (§2)", () => {
+  it("the toolbar uses flex-wrap and does not horizontally scroll", () => {
+    const toolbarStart = modalSource.indexOf('role="toolbar"');
+    const toolbarOpenTagStart = modalSource.lastIndexOf("<div", toolbarStart);
+    const toolbarOpenTag = modalSource.slice(toolbarOpenTagStart, toolbarStart);
+    assert.ok(toolbarOpenTag.includes("flex-wrap"));
+    assert.ok(!toolbarOpenTag.includes("overflow-x-auto"));
+    assert.ok(!toolbarOpenTag.includes("scrollbar-hide"));
+  });
+});
+
+describe("CreatePostModal — idempotency key is untouched by selector state changes (§20 idempotency proof)", () => {
+  it("idempotencyKeyRef.current is assigned only in the open-reset effect and the mutation lifecycle, never inside a selector handler", () => {
+    const assignmentPattern = /idempotencyKeyRef\.current\s*=/g;
+    const assignments = modalSource.match(assignmentPattern) || [];
+    // Known legitimate assignment sites: (1) reset to null when the modal
+    // re-opens, (2) generated once inside mutationFn if still null, (3)
+    // reset to null on successful submit. Exactly 3 — if this count grows,
+    // something new is writing to it and must be justified explicitly.
+    assert.strictEqual(assignments.length, 3);
+
+    const toolbarStart = modalSource.indexOf('role="toolbar"');
+    const toolbarEnd = modalSource.indexOf("{/* Text area, exactly as specified", toolbarStart);
+    const toolbarSection = modalSource.slice(toolbarStart, toolbarEnd);
+    assert.ok(
+      !toolbarSection.includes("idempotencyKeyRef"),
+      "no selector's onSelect/onClear/onToggle handler may touch idempotencyKeyRef",
+    );
+  });
+});
+
+/**
+ * Disclosed limitation (§22 item 11 — "selector state survives ordinary
+ * rerender"): this project has no jsdom/React Testing Library harness, so
+ * an actual mount -> select Feeling -> trigger unrelated rerender -> assert
+ * Feeling still selected test is not possible here. As a structural proxy,
+ * every metadata selector below is rendered as a single static JSX element
+ * (never inside a `.map()` with a derived `key`), so React has no reason to
+ * unmount/remount it — and therefore no reason to lose the popover's own
+ * internal open/search state — on an unrelated draft update. The actual
+ * *data* (draft.feelingId etc.) lives in CreatePostModal's own useState and
+ * is proven stable by the pure applyFeelingSelection/applyActivitySelection
+ * tests in create-post-rules.test.ts, which is the part that genuinely
+ * matters for "does selecting X reset Y" — rerender survival of that state
+ * is a property of `useState` itself, not of this component's code.
+ */
+describe("CreatePostModal — metadata selectors are single static instances (§22 item 11 limitation proxy)", () => {
+  it("Feeling/Activity/Category/Tags/PetTagPopover/LocationPopover are not rendered inside a .map() (no derived `key` prop that could force a remount)", () => {
+    const toolbarStart = modalSource.indexOf('role="toolbar"');
+    const toolbarEnd = modalSource.indexOf("{/* Text area, exactly as specified", toolbarStart);
+    const toolbarSection = modalSource.slice(toolbarStart, toolbarEnd);
+    assert.ok(!/\bkey=\{/.test(toolbarSection));
+  });
+});

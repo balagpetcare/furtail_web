@@ -214,6 +214,38 @@ describe("draftToCreatePostInput", () => {
     assert.strictEqual(input.locationText, "Central Park, New York");
   });
 
+  it("SELECTOR UX UNIFICATION §20: a draft with Post Type + Feeling + Activity + Pet + Location + Category + Tags all set simultaneously builds a payload where every field survives — no selection erases an unrelated one", () => {
+    const draft = {
+      ...DEFAULT_DRAFT,
+      caption: "Full metadata post",
+      postType: "HEALTH_UPDATE",
+      feelingId: "happy",
+      feelingLabel: "Happy",
+      feelingEmoji: "😊",
+      activityId: "playing",
+      activityLabel: "Playing",
+      activityEmoji: "🎮",
+      taggedPetIds: [42],
+      locationText: "Dhaka",
+      category: "GENERAL",
+      contentTagIds: [7, 9],
+    };
+
+    const input = draftToCreatePostInput(draft);
+
+    assert.strictEqual(input.postType, "HEALTH_UPDATE");
+    assert.strictEqual(input.feelingId, "happy");
+    assert.strictEqual(input.feelingLabel, "Happy");
+    assert.strictEqual(input.feelingEmoji, "😊");
+    assert.strictEqual(input.activityId, "playing");
+    assert.strictEqual(input.activityLabel, "Playing");
+    assert.strictEqual(input.activityEmoji, "🎮");
+    assert.deepStrictEqual(input.taggedPetIds, [42]);
+    assert.strictEqual(input.locationText, "Dhaka");
+    assert.strictEqual(input.category, "GENERAL");
+    assert.deepStrictEqual(input.contentTagIds, [7, 9]);
+  });
+
   it("includes music metadata when provided", () => {
     const draft = {
       ...DEFAULT_DRAFT,

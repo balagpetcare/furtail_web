@@ -5,6 +5,8 @@ import {
   isValidPostCategoryKey,
   applyFeelingSelection,
   applyActivitySelection,
+  clearFeeling,
+  clearActivity,
   togglePetSelection,
   toggleContentTagSelection,
   type FeelingActivityFields,
@@ -44,8 +46,8 @@ describe("isValidPostCategoryKey", () => {
   });
 });
 
-describe("applyFeelingSelection / applyActivitySelection (mutual exclusion)", () => {
-  it("selecting a Feeling sets feeling fields and clears any Activity", () => {
+describe("applyFeelingSelection / applyActivitySelection / clearFeeling / clearActivity (Feeling + Activity coexist)", () => {
+  it("selecting a Feeling sets feeling fields and does NOT clear an existing Activity", () => {
     const draft: FeelingActivityFields = {
       activityId: "walking",
       activityLabel: "Walking",
@@ -57,12 +59,13 @@ describe("applyFeelingSelection / applyActivitySelection (mutual exclusion)", ()
     assert.strictEqual(result.feelingId, "happy");
     assert.strictEqual(result.feelingLabel, "Happy");
     assert.strictEqual(result.feelingEmoji, "😊");
-    assert.strictEqual(result.activityId, undefined);
-    assert.strictEqual(result.activityLabel, undefined);
-    assert.strictEqual(result.activityEmoji, undefined);
+    // Activity, set before this call, must survive untouched.
+    assert.strictEqual(result.activityId, "walking");
+    assert.strictEqual(result.activityLabel, "Walking");
+    assert.strictEqual(result.activityEmoji, "🚶");
   });
 
-  it("selecting an Activity sets activity fields and clears any Feeling", () => {
+  it("selecting an Activity sets activity fields and does NOT clear an existing Feeling", () => {
     const draft: FeelingActivityFields = {
       feelingId: "happy",
       feelingLabel: "Happy",
@@ -74,9 +77,100 @@ describe("applyFeelingSelection / applyActivitySelection (mutual exclusion)", ()
     assert.strictEqual(result.activityId, "walking");
     assert.strictEqual(result.activityLabel, "Walking");
     assert.strictEqual(result.activityEmoji, "🚶");
+    // Feeling, set before this call, must survive untouched.
+    assert.strictEqual(result.feelingId, "happy");
+    assert.strictEqual(result.feelingLabel, "Happy");
+    assert.strictEqual(result.feelingEmoji, "😊");
+  });
+
+  it("Feeling AND Activity can both be set simultaneously by applying both in sequence, in either order", () => {
+    const empty: FeelingActivityFields = {};
+
+    const feelingFirst = applyActivitySelection(
+      applyFeelingSelection(empty, { key: "happy", label: "Happy", emoji: "😊" }),
+      { key: "playing", label: "Playing", emoji: "🎮" },
+    );
+    assert.strictEqual(feelingFirst.feelingId, "happy");
+    assert.strictEqual(feelingFirst.activityId, "playing");
+
+    const activityFirst = applyFeelingSelection(
+      applyActivitySelection(empty, { key: "playing", label: "Playing", emoji: "🎮" }),
+      { key: "happy", label: "Happy", emoji: "😊" },
+    );
+    assert.strictEqual(activityFirst.feelingId, "happy");
+    assert.strictEqual(activityFirst.activityId, "playing");
+  });
+
+  it("changing Feeling while an Activity is set leaves Activity unchanged (e.g. Happy -> Excited, Activity stays Walking)", () => {
+    const draft: FeelingActivityFields = {
+      feelingId: "happy",
+      feelingLabel: "Happy",
+      feelingEmoji: "😊",
+      activityId: "walking",
+      activityLabel: "Walking",
+      activityEmoji: "🚶",
+    };
+
+    const result = applyFeelingSelection(draft, { key: "excited", label: "Excited", emoji: "🤩" });
+
+    assert.strictEqual(result.feelingId, "excited");
+    assert.strictEqual(result.activityId, "walking");
+    assert.strictEqual(result.activityLabel, "Walking");
+  });
+
+  it("changing Activity while a Feeling is set leaves Feeling unchanged (e.g. Playing -> Walking, Feeling stays Happy)", () => {
+    const draft: FeelingActivityFields = {
+      feelingId: "happy",
+      feelingLabel: "Happy",
+      activityId: "playing",
+      activityLabel: "Playing",
+    };
+
+    const result = applyActivitySelection(draft, { key: "walking", label: "Walking", emoji: "🚶" });
+
+    assert.strictEqual(result.activityId, "walking");
+    assert.strictEqual(result.feelingId, "happy");
+    assert.strictEqual(result.feelingLabel, "Happy");
+  });
+
+  it("clearFeeling removes only the Feeling fields, leaving Activity untouched", () => {
+    const draft: FeelingActivityFields = {
+      feelingId: "happy",
+      feelingLabel: "Happy",
+      feelingEmoji: "😊",
+      activityId: "playing",
+      activityLabel: "Playing",
+      activityEmoji: "🎮",
+    };
+
+    const result = clearFeeling(draft);
+
     assert.strictEqual(result.feelingId, undefined);
     assert.strictEqual(result.feelingLabel, undefined);
     assert.strictEqual(result.feelingEmoji, undefined);
+    assert.strictEqual(result.activityId, "playing");
+    assert.strictEqual(result.activityLabel, "Playing");
+    assert.strictEqual(result.activityEmoji, "🎮");
+  });
+
+  it("clearActivity removes only the Activity fields, leaving Feeling untouched", () => {
+    const draft: FeelingActivityFields = {
+      feelingId: "happy",
+      feelingLabel: "Happy",
+      feelingEmoji: "😊",
+      activityId: "playing",
+      activityLabel: "Playing",
+      activityEmoji: "🎮",
+    };
+
+    const result = clearActivity(draft);
+
+    assert.strictEqual(result.activityId, undefined);
+    assert.strictEqual(result.activityLabel, undefined);
+    assert.strictEqual(result.activityEmoji, undefined);
+    assert.strictEqual(result.feelingId, "happy");
+    assert.strictEqual(result.feelingLabel, "Happy");
+    assert.strictEqual(result.feelingEmoji, "😊");
   });
 
   it("does not mutate the input draft object", () => {

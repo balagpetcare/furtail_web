@@ -36,8 +36,11 @@ export interface FeelingActivityFields {
   activityEmoji?: string;
 }
 
-/** Selecting a Feeling clears any selected Activity — canonical
- * mutual-exclusion rule (COMMAND 02 §8). */
+/** Sets the selected Feeling. Feeling and Activity are independent
+ * fields — this must NEVER touch activityId/activityLabel/activityEmoji.
+ * (Selector UX Unification: a prior mutual-exclusion rule that cleared
+ * Activity here was removed — the backend has no such constraint, and a
+ * post can legitimately be both "Happy" and "Playing" at once.) */
 export function applyFeelingSelection<T extends FeelingActivityFields>(
   draft: T,
   option: { key: string; label: string; emoji?: string }
@@ -47,14 +50,11 @@ export function applyFeelingSelection<T extends FeelingActivityFields>(
     feelingId: option.key,
     feelingLabel: option.label,
     feelingEmoji: option.emoji,
-    activityId: undefined,
-    activityLabel: undefined,
-    activityEmoji: undefined,
   };
 }
 
-/** Selecting an Activity clears any selected Feeling — same rule, other
- * direction. */
+/** Sets the selected Activity. Must NEVER touch feelingId/feelingLabel/
+ * feelingEmoji — see applyFeelingSelection above. */
 export function applyActivitySelection<T extends FeelingActivityFields>(
   draft: T,
   option: { key: string; label: string; emoji?: string }
@@ -64,9 +64,26 @@ export function applyActivitySelection<T extends FeelingActivityFields>(
     activityId: option.key,
     activityLabel: option.label,
     activityEmoji: option.emoji,
+  };
+}
+
+/** Clears only the Feeling fields — Activity, if any, is left untouched. */
+export function clearFeeling<T extends FeelingActivityFields>(draft: T): T {
+  return {
+    ...draft,
     feelingId: undefined,
     feelingLabel: undefined,
     feelingEmoji: undefined,
+  };
+}
+
+/** Clears only the Activity fields — Feeling, if any, is left untouched. */
+export function clearActivity<T extends FeelingActivityFields>(draft: T): T {
+  return {
+    ...draft,
+    activityId: undefined,
+    activityLabel: undefined,
+    activityEmoji: undefined,
   };
 }
 
