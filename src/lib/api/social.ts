@@ -85,11 +85,19 @@ export const socialApi = {
   },
 
   getSuggestions: async () => {
-    const raw = await fetchApi<{
-      items: Array<Record<string, unknown>>;
-      nextCursor?: string | null;
-      hasMore: boolean;
-    }>(`/social/discovery/suggestions`);
+    let raw;
+    try {
+      raw = await fetchApi<{
+        items: Array<Record<string, unknown>>;
+        nextCursor?: string | null;
+        hasMore: boolean;
+      }>(`/social/discovery/suggestions`);
+    } catch (e: unknown) {
+      if (e && typeof e === 'object' && 'status' in e && (e as any).status === 404) {
+        return { items: [], nextCursor: null, hasMore: false };
+      }
+      throw e;
+    }
 
     const items = raw?.items ?? [];
     const seen = new Set<string>();

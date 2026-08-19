@@ -80,6 +80,13 @@ export const messagesApi = {
   },
 
   getUnreadSummary: async () => {
-    return fetchApi<{ totalUnreadConversations: number, totalUnreadMessages: number }>("/messages/unread");
+    try {
+      return await fetchApi<{ totalUnreadConversations: number, totalUnreadMessages: number }>("/messages/unread");
+    } catch (e: unknown) {
+      if (e && typeof e === 'object' && 'status' in e && (e as any).status === 404) {
+        return { totalUnreadConversations: 0, totalUnreadMessages: 0 };
+      }
+      throw e;
+    }
   }
 };
