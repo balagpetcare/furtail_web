@@ -198,6 +198,15 @@ export function PostCard({ post }: PostCardProps) {
     onError: () => toast.error("Failed to share post"),
   });
 
+  const retryMediaMutation = useMutation({
+    mutationFn: (mediaId: number | string) => postsApi.retryMediaProcessing(mediaId),
+    onSuccess: () => {
+      toast.success("Re-processing video…");
+      invalidateFeeds();
+    },
+    onError: () => toast.error("Failed to retry processing"),
+  });
+
   const editMutation = useMutation({
     mutationFn: () => postsApi.editPost(String(post.id), { caption: editCaption }),
     onSuccess: () => {
@@ -307,7 +316,12 @@ export function PostCard({ post }: PostCardProps) {
                 <CaptionText text={post.caption} backgroundStyle={post.backgroundStyle} />
               </ClickableRegion>
             )}
-            <MediaGrid media={post.media} onOpen={openSinglePost} />
+            <MediaGrid
+              media={post.media}
+              onOpen={openSinglePost}
+              onRetryMedia={isOwner ? (mediaId) => retryMediaMutation.mutate(mediaId) : undefined}
+              postId={post.id}
+            />
           </>
         )
       }

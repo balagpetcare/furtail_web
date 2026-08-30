@@ -6,6 +6,8 @@ import { getMediaUrl } from "@/lib/media";
 import { cn } from "@/lib/utils";
 import { isVideoMedia, type FeedMediaItem } from "@/components/feed/media-grid";
 import { MediaViewerControls } from "@/components/feed/media-viewer-controls";
+import { FurtailVideoPlayer } from "@/components/video/furtail-video-player";
+import { toVideoMedia } from "@/lib/video/types";
 
 const SWIPE_THRESHOLD_PX = 50;
 const MAX_ZOOM = 4;
@@ -31,17 +33,26 @@ export function MediaCarousel({
   className,
   showViewerControls = true,
   variant = "viewer",
+  onRetryMedia,
 }: {
   media: FeedMediaItem[];
   initialIndex?: number;
   className?: string;
   showViewerControls?: boolean;
   variant?: "viewer" | "inline";
+  onRetryMedia?: (mediaId: number | string) => void;
 }) {
   // Pure dispatcher — no hooks of its own, so branching on `variant` here
   // can never violate rules-of-hooks regardless of which branch's hooks run.
   if (variant === "inline") {
-    return <InlineMediaGallery media={media} initialIndex={initialIndex} className={className} />;
+    return (
+      <InlineMediaGallery
+        media={media}
+        initialIndex={initialIndex}
+        className={className}
+        onRetryMedia={onRetryMedia}
+      />
+    );
   }
   return (
     <ViewerMediaCarousel
@@ -49,6 +60,7 @@ export function MediaCarousel({
       initialIndex={initialIndex}
       className={className}
       showViewerControls={showViewerControls}
+      onRetryMedia={onRetryMedia}
     />
   );
 }
@@ -58,11 +70,13 @@ function ViewerMediaCarousel({
   initialIndex = 0,
   className,
   showViewerControls = true,
+  onRetryMedia,
 }: {
   media: FeedMediaItem[];
   initialIndex?: number;
   className?: string;
   showViewerControls?: boolean;
+  onRetryMedia?: (mediaId: number | string) => void;
 }) {
   const clamp = (i: number) => Math.min(Math.max(i, 0), Math.max(media.length - 1, 0));
   // Callers remount this component with `key={initialIndex}` whenever they
@@ -190,7 +204,7 @@ function ViewerMediaCarousel({
           }}
           className="w-full h-full flex items-center justify-center"
         >
-          <CarouselItem item={current} />
+          <CarouselItem item={current} onRetry={onRetryMedia} />
         </div>
       </div>
 
@@ -265,10 +279,12 @@ function InlineMediaGallery({
   media,
   initialIndex = 0,
   className,
+  onRetryMedia,
 }: {
   media: FeedMediaItem[];
   initialIndex?: number;
   className?: string;
+  onRetryMedia?: (mediaId: number | string) => void;
 }) {
   const clamp = (i: number) => Math.min(Math.max(i, 0), Math.max(media.length - 1, 0));
   const [index, setIndex] = useState(clamp(initialIndex));
@@ -309,7 +325,7 @@ function InlineMediaGallery({
       }}
     >
       <div className="w-full flex items-center justify-center bg-gray-50 rounded-xl overflow-hidden max-h-[70vh]">
-        <CarouselItem item={current} naturalSize />
+        <CarouselItem item={current} naturalSize onRetry={onRetryMedia} />
       </div>
 
       {!currentIsVideo && currentUrl && (
@@ -368,7 +384,15 @@ function InlineMediaGallery({
   );
 }
 
-function CarouselItem({ item, naturalSize = false }: { item: FeedMediaItem; naturalSize?: boolean }) {
+function CarouselItem({
+  item,
+  naturalSize = false,
+  onRetry,
+}: {
+  item: FeedMediaItem;
+  naturalSize?: boolean;
+  onRetry?: (mediaId: number | string) => void;
+}) {
   const [error, setError] = useState(false);
   const url = item.url ? getMediaUrl(item.url) : undefined;
 
@@ -382,19 +406,27 @@ function CarouselItem({ item, naturalSize = false }: { item: FeedMediaItem; natu
   }
 
   const sizeClassName = naturalSize
-    ? "max-w-full max-h-[70vh] w-auto h-auto object-contain"
-    : "max-w-full max-h-full w-auto h-auto object-contain";
+    ? "max-h-[70vh] w-full"
+    : "w-full h-full";
 
   if (isVideoMedia(item)) {
+    const videoMedia = toVideoMedia(item);
+    if (!videoMedia) {
+      return (
+        <div className="flex flex-col items-center justify-center text-gray-400 w-full h-full">
+          <ImageOff className="w-10 h-10 mb-2 stroke-[1.5]" />
+          <span className="text-sm">Media unavailable</span>
+        </div>
+      );
+    }
     return (
-      <video
+      <FurtailVideoPlayer
         key={item.id}
-        src={url}
-        controls
-        playsInline
-        preload="metadata"
-        className={sizeClassName}
+        video={videoMedia}
+        mode="single"
+        onRetry={onRetry}
         onError={() => setError(true)}
+        className={sizeClassName}
       />
     );
   }
@@ -404,7 +436,7 @@ function CarouselItem({ item, naturalSize = false }: { item: FeedMediaItem; natu
       key={item.id}
       src={url}
       alt="Post media"
-      className={sizeClassName}
+      className={cn("max-w-full max-h-full w-auto h-auto object-contain", naturalSize && "max-h-[70vh]")}
       onError={() => setError(true)}
     />
   );

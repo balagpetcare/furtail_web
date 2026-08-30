@@ -5,15 +5,27 @@ import { ImageOff } from "lucide-react";
 import { getMediaUrl } from "@/lib/media";
 import { cn } from "@/lib/utils";
 import { ClickableRegion } from "@/components/feed/clickable-region";
+import { FurtailVideoPlayer } from "@/components/video/furtail-video-player";
+import { toVideoMedia } from "@/lib/video/types";
 
 export interface FeedMediaItem {
   id: number | string;
   url: string;
   type?: string;
+  /** Processing status (READY | PLAYABLE | PROCESSING | FAILED). Used to
+   * render a safe placeholder instead of a broken raw video player for media
+   * that hasn't finished (or failed) HLS processing. */
+  status?: string;
+  hlsUrl?: string | null;
+  posterUrl?: string | null;
 }
 
 export function isVideoMedia(item: FeedMediaItem): boolean {
   return Boolean(item.type?.startsWith("video") || item.url.endsWith(".mp4"));
+}
+
+function isPlayable(item: FeedMediaItem): boolean {
+  return item.status === "PLAYABLE" || item.status === "READY";
 }
 
 /**
@@ -25,17 +37,22 @@ export function MediaGrid({
   media,
   onOpen,
   className,
+  onRetryMedia,
+  postId,
 }: {
   media: FeedMediaItem[];
   onOpen?: (index: number) => void;
   className?: string;
+  onRetryMedia?: (mediaId: number | string) => void;
+  /** Post id (used to link feed videos to the immersive `/videos/[id]` viewer). */
+  postId?: string | number;
 }) {
   if (!media || media.length === 0) return null;
 
   return (
     <div className={cn("mt-3.5 rounded-xl overflow-hidden bg-gray-50 border border-gray-100/70", className)}>
       {media.length === 1 ? (
-        <GridCell item={media[0]} index={0} onOpen={onOpen} className="rounded-none" />
+        <GridCell item={media[0]} index={0} onOpen={onOpen} onRetryMedia={onRetryMedia} postId={postId} className="rounded-none" />
       ) : (
         <div className="grid gap-1 bg-gray-100/60 grid-cols-2">
           {media.slice(0, 4).map((item, index) => (
@@ -44,6 +61,8 @@ export function MediaGrid({
               item={item}
               index={index}
               onOpen={onOpen}
+              onRetryMedia={onRetryMedia}
+              postId={postId}
               className={cn(
                 "aspect-square rounded-none",
                 media.length === 3 && index === 0 ? "row-span-2 aspect-auto h-full min-h-[250px]" : ""
@@ -63,12 +82,16 @@ function GridCell({
   onOpen,
   className,
   overflowBadge,
+  onRetryMedia,
+  postId,
 }: {
   item: FeedMediaItem;
   index: number;
   onOpen?: (index: number) => void;
   className?: string;
   overflowBadge?: number;
+  onRetryMedia?: (mediaId: number | string) => void;
+  postId?: string | number;
 }) {
   // Video cells don't wrap in a click-to-open region — a `<video controls>`
   // needs raw mouse/touch access to its own play/scrub/volume controls, and
@@ -80,7 +103,7 @@ function GridCell({
   if (isVideoMedia(item)) {
     return (
       <div className={cn("relative overflow-hidden bg-gray-50 flex items-center justify-center", className)}>
-        <MediaItem mediaItem={item} />
+        <MediaItem mediaItem={item} onRetry={onRetryMedia} postId={postId} />
         {overflowBadge !== undefined && (
           <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-white font-bold text-lg select-none pointer-events-none">
             +{overflowBadge}
@@ -106,11 +129,37 @@ function GridCell({
   );
 }
 
-export function MediaItem({ mediaItem }: { mediaItem: FeedMediaItem }) {
+export function MediaItem({ mediaItem, onRetry, postId }: { mediaItem: FeedMediaItem; onRetry?: (mediaId: number | string) => void; postId?: string | number }) {
   const [error, setError] = useState(false);
   const mediaUrl = mediaItem.url;
 
-  if (error || !mediaUrl) {
+  // Video items delegate entirely to FurtailVideoPlayer, which handles
+  // status-aware placeholders (Processing/Failed), HLS/MP4 fallback,
+  // and error UI internally — no duplicated status logic here.
+  if (isVideoMedia(mediaItem)) {
+    const videoMedia = toVideoMedia(mediaItem, postId);
+    if (!videoMedia) {
+      return (
+        <div className="flex flex-col items-center justify-center py-16 px-4 text-gray-400 bg-gray-50/50 w-full h-full min-h-[180px]">
+          <ImageOff className="w-8 h-8 mb-2 stroke-[1.5]" />
+          <span className="text-sm">Attachment unavailable</span>
+        </div>
+      );
+    }
+    return (
+      <FurtailVideoPlayer
+        video={videoMedia}
+        mode="feed"
+        onRetry={onRetry}
+        showWatchInVideos={postId !== undefined}
+        className="w-full h-full max-h-[500px] object-cover"
+      />
+    );
+  }
+
+  // Image items keep the existing error handling.
+  const imageUrl = mediaUrl ? getMediaUrl(mediaUrl) : undefined;
+  if (error || !imageUrl) {
     return (
       <div className="flex flex-col items-center justify-center py-16 px-4 text-gray-400 bg-gray-50/50 w-full h-full min-h-[180px]">
         <ImageOff className="w-8 h-8 mb-2 stroke-[1.5]" />
@@ -119,20 +168,9 @@ export function MediaItem({ mediaItem }: { mediaItem: FeedMediaItem }) {
     );
   }
 
-  if (isVideoMedia(mediaItem)) {
-    return (
-      <video
-        src={getMediaUrl(mediaUrl)}
-        controls
-        className="w-full h-full max-h-[500px] object-cover outline-none"
-        onError={() => setError(true)}
-      />
-    );
-  }
-
   return (
     <img
-      src={getMediaUrl(mediaUrl)}
+      src={imageUrl}
       alt="Post attachment"
       loading="lazy"
       decoding="async"

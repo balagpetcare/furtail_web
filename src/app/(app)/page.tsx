@@ -30,6 +30,19 @@ export default function HomeFeed() {
     queryKey: activeTab === "trending" ? postsKeys.feed("trending") : postsKeys.feed("for-you"),
     queryFn: () => (activeTab === "trending" ? postsApi.getTrending(10) : postsApi.getFeed({ limit: 10 })),
     retry: 1,
+    // Bounded PROCESSING-state polling (phase 3.5 / section 12): while any
+    // post in the feed still has a PROCESSING attachment, refetch every 3s so
+    // the "Processing video…" placeholder upgrades to a playable player as
+    // soon as the backend flips the media to PLAYABLE/READY (and the post to
+    // ACTIVE) — with NO page reload. Stops automatically once no PROCESSING
+    // media remains; normal (ACTIVE) feeds are never polled.
+    refetchInterval: (query) => {
+      const feed = query.state.data as { data?: Array<{ media?: Array<{ status?: string }> }> } | undefined;
+      const hasProcessing = (feed?.data ?? []).some((post) =>
+        (post.media ?? []).some((m) => m.status === "PROCESSING"),
+      );
+      return hasProcessing ? 3000 : false;
+    },
   });
 
   // Restores Home's scroll position when returning from a post opened via

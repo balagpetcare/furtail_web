@@ -1,4 +1,4 @@
-import { fetchApi } from "../api-client";
+import { fetchApi, fetchEnvelope } from "../api-client";
 
 // Canonical post type/category/privacy enums
 export type PostType = "TEXT" | "IMAGE" | "VIDEO" | "REEL";
@@ -37,12 +37,27 @@ export interface Post {
     username?: string;
     avatarUrl?: string;
   };
-  media: Array<{ id: number; url: string; type?: string }>;
+  media: Array<{
+    id: number;
+    url: string;
+    type?: string;
+    status?: string;
+    hlsUrl?: string | null;
+    posterUrl?: string | null;
+    durationMs?: number | null;
+    width?: number | null;
+    height?: number | null;
+  }>;
   likeCount: number;
   commentCount: number;
   shareCount?: number;
+  /** Aggregate play/view count for video posts (surfaced by the backend). */
+  viewCount?: number;
   isLikedByMe: boolean;
   isBookmarkedByMe?: boolean;
+  /** Whether the viewer follows the post's author (surfaced by the
+   * backend; drives the follow/unfollow action in the video viewer). */
+  isFollowingAuthor?: boolean;
 
   // New Reaction System fields
   viewerReaction?: string | null;
@@ -158,12 +173,24 @@ export function normalizePost(raw: any): Post {
         id: m.id,
         url: m.media.url || "",
         type: m.media.mimetype || m.media.type || undefined,
+        status: m.media.status ?? undefined,
+        hlsUrl: m.media.hlsUrl ?? undefined,
+        posterUrl: m.media.posterUrl ?? undefined,
+        durationMs: m.media.durationMs ?? undefined,
+        width: m.media.width ?? undefined,
+        height: m.media.height ?? undefined,
       };
     }
     return {
       id: m.id,
       url: m.url || "",
       type: m.type || undefined,
+      status: m.status ?? undefined,
+      hlsUrl: m.hlsUrl ?? undefined,
+      posterUrl: m.posterUrl ?? undefined,
+      durationMs: m.durationMs ?? undefined,
+      width: m.width ?? undefined,
+      height: m.height ?? undefined,
     };
   });
 
@@ -216,6 +243,52 @@ export const postsApi = {
     return (raw ?? []).map(normalizePost);
   },
 
+  /**
+   * Phase 2/3: Dedicated videos endpoint (`GET /api/v1/videos/feed`) —
+   * returns ONLY posts with at least one PLAYABLE/READY video media.
+   * Uses cursor-based pagination. `fetchEnvelope` keeps the response
+   * `meta` so the `nextCursor`/`hasMore` come back with the items.
+   */
+  getEligibleVideosFeed: async ({ cursor, limit = 20, sort }: { cursor?: string; limit?: number; sort?: string }) => {
+    const envelope = await fetchEnvelope<{
+      success: boolean;
+      data?: unknown[];
+      meta?: { nextCursor?: string | null; hasMore?: boolean; limit?: number };
+    }>("/videos/feed", { params: { cursor, limit, sort } });
+    return {
+      data: (envelope?.data ?? []).map(normalizePost),
+      nextCursor: envelope?.meta?.nextCursor ?? undefined,
+      hasMore: envelope?.meta?.hasMore ?? false,
+    };
+  },
+
+  /**
+   * Phase 2: Single video post detail (`GET /api/v1/videos/:id`) —
+   * verifies the post contains video media and is visible to the
+   * caller. Returns the same `Post` shape as `getPost`.
+   */
+  getVideoPost: async (id: string | number) => {
+    const raw = await fetchApi<any>(`/videos/${id}`);
+    return normalizePost(raw);
+  },
+
+  /**
+   * Phase 2: Engagement event ingestion (`POST /api/v1/videos/:id/events`).
+   * Events are buffered server-side and flushed to the DB in batches —
+   * the response is 202 Accepted, not 200 OK. The `sessionId` + `eventType`
+   * pair is idempotent: duplicate submissions are silently dropped.
+   */
+  ingestVideoEngagementEvents: async (
+    postId: string | number,
+    sessionId: string,
+    events: Array<{ eventType: string; positionMs?: number }>,
+  ) => {
+    return fetchApi<any>(`/videos/${postId}/events`, {
+      method: "POST",
+      body: { sessionId, events },
+    });
+  },
+
   getUserPosts: async (userId: string | number, cursor?: string, limit = 50) => {
     const raw = await fetchApi<unknown>(`/posts/user/${userId}`, {
       params: { cursor, limit },
@@ -251,6 +324,18 @@ export const postsApi = {
       method: "PATCH",
       body: data,
     }).then(normalizePost);
+  },
+
+  /**
+   * Re-enqueues an already-uploaded video for (re)processing without
+   * re-uploading the original. Used when a video's processing FAILED (recover
+   * it in place) or a PLAYABLE video is missing higher-quality renditions.
+   * Returns the media id and its (now PROCESSING) status.
+   */
+  retryMediaProcessing: async (mediaId: number | string) => {
+    return fetchApi<{ id: number; status: string }>(`/media/${mediaId}/process`, {
+      method: "POST",
+    });
   },
 
   deletePost: async (id: string) => {

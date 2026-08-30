@@ -16,11 +16,14 @@ export interface MediaItem {
   serverMediaId?: number;
   /** Present only after a successful upload; the canonical persisted URL. */
   serverUrl?: string;
+  hlsUrl?: string | null;
   thumbnailUrl?: string | null;
   type: "IMAGE" | "VIDEO" | "FILE";
-  status: "LOCAL" | "UPLOADING" | "READY" | "FAILED";
+  status: "LOCAL" | "UPLOADING" | "PROCESSING" | "PLAYABLE" | "READY" | "FAILED";
   error?: string;
   order: number;
+  progress?: number; // 0-100 for upload progress
+  localThumbnailUrl?: string;
 }
 
 export interface CreatePostDraft {
@@ -74,8 +77,13 @@ export function inferPostType(media: MediaItem[]): PostType {
 }
 
 export function draftToCreatePostInput(draft: CreatePostDraft): CreatePostInput {
+  // Include any successfully-uploaded media that isn't FAILED — READY and
+  // PLAYABLE attach normally; PROCESSING attaches through the pending-post
+  // flow (the backend creates the post PROCESSING and publishes it once the
+  // media resolves). FAILED media is deliberately excluded and surfaced to
+  // the user for retry/removal instead.
   const mediaIds = draft.media
-    .filter((m) => m.status === "READY" && typeof m.serverMediaId === "number")
+    .filter((m) => m.status !== "FAILED" && typeof m.serverMediaId === "number")
     .sort((a, b) => a.order - b.order)
     .map((m) => m.serverMediaId as number);
 

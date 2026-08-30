@@ -6,6 +6,7 @@ import { BottomNav } from "./bottom-nav";
 import { Header } from "./header";
 import { RightSidebar } from "./right-sidebar";
 import { markAppVisited } from "@/lib/return-navigation";
+import { GlobalUploadIndicator } from "./global-upload-indicator";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -25,6 +26,9 @@ export function AppShell({ children }: AppShellProps) {
     <div className="min-h-screen bg-gray-50/50 w-full flex flex-col text-gray-900 font-sans antialiased">
       {/* Sticky Global Top Header */}
       <Header />
+      
+      {/* Global Upload Progress Indicator */}
+      <GlobalUploadIndicator />
 
       <div className="w-full max-w-7xl mx-auto flex flex-row relative flex-1 px-0 sm:px-6 lg:px-8 gap-6">
         {/* Desktop/Tablet Left Sidebar */}

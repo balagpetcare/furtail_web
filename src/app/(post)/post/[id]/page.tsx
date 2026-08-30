@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { postsApi, postsKeys } from "@/lib/api/posts";
 import { X } from "lucide-react";
 import Link from "next/link";
@@ -20,6 +20,7 @@ import { fetchApi } from "@/lib/api-client";
 import { getMediaUrl } from "@/lib/media";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 import { hasInternalAppHistory } from "@/lib/return-navigation";
 
 /**
@@ -47,6 +48,15 @@ export default function SinglePostPage() {
     queryKey: postsKeys.detail(postId),
     queryFn: () => postsApi.getPost(postId),
     enabled: !!postId,
+    // While any attached video is still processing, poll so the "Processing
+    // video" placeholder live-updates to a playable player once the media
+    // resolves (the pending post promotes from PROCESSING to ACTIVE on the
+    // backend; polling here picks that up for the detail view).
+    refetchInterval: (query) => {
+      const p = query.state.data as { media?: Array<{ status?: string }> } | undefined;
+      const processing = (p?.media ?? []).some((m) => m.status === "PROCESSING");
+      return processing ? 4000 : false;
+    },
   });
 
   const { data: me } = useQuery({
@@ -57,6 +67,16 @@ export default function SinglePostPage() {
 
   const { likeMutation, reactMutation, bookmarkMutation, editMutation, deleteMutation, share } = usePostActions(post, {
     onDeleted: () => router.push("/"),
+  });
+
+  const queryClient = useQueryClient();
+  const retryMediaMutation = useMutation({
+    mutationFn: (mediaId: number | string) => postsApi.retryMediaProcessing(mediaId),
+    onSuccess: () => {
+      toast.success("Re-processing video…");
+      queryClient.invalidateQueries({ queryKey: postsKeys.detail(postId) });
+    },
+    onError: () => toast.error("Failed to retry processing"),
   });
 
   // Prefer real browser/router history (also restores the origin page's
@@ -118,7 +138,12 @@ export default function SinglePostPage() {
         <div className="xl:max-w-[1400px] xl:mx-auto lg:grid lg:grid-cols-[1.6fr_1fr] lg:items-start">
           {media.length > 0 && (
             <div className="hidden lg:flex items-center justify-center relative bg-black w-full h-screen lg:sticky lg:top-0">
-              <MediaCarousel key={`lg-${initialMediaIndex}`} media={media} initialIndex={initialMediaIndex} />
+              <MediaCarousel
+                key={`lg-${initialMediaIndex}`}
+                media={media}
+                initialIndex={initialMediaIndex}
+                onRetryMedia={isOwner ? (mediaId) => retryMediaMutation.mutate(mediaId) : undefined}
+              />
             </div>
           )}
 
@@ -183,7 +208,12 @@ export default function SinglePostPage() {
               {/* Small-screen media (large-screen media is the sticky left column above) */}
               {media.length > 0 && (
                 <div className="relative rounded-xl overflow-hidden bg-black aspect-square sm:aspect-[4/3] lg:hidden">
-                  <MediaCarousel key={`sm-${initialMediaIndex}`} media={media} initialIndex={initialMediaIndex} />
+                  <MediaCarousel
+                    key={`sm-${initialMediaIndex}`}
+                    media={media}
+                    initialIndex={initialMediaIndex}
+                    onRetryMedia={isOwner ? (mediaId) => retryMediaMutation.mutate(mediaId) : undefined}
+                  />
                 </div>
               )}
 

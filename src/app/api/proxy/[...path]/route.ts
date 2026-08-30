@@ -7,7 +7,6 @@ export const dynamic = "force-dynamic";
 const HOP_BY_HOP_REQUEST_HEADERS = new Set([
   "host",
   "connection",
-  "content-length",
   "cookie",
   "transfer-encoding",
 ]);

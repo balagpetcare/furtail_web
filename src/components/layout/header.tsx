@@ -28,7 +28,8 @@ import {
   Search, 
   Settings, 
   User, 
-  LogOut 
+  LogOut,
+  Clapperboard
 } from "lucide-react";
 
 export function Header() {
@@ -52,6 +53,7 @@ export function Header() {
     { href: "/", icon: Home, label: "Home" },
     { href: "/explore", icon: Compass, label: "Explore" },
     { href: "/people", icon: Users, label: "People" },
+    { href: "/videos", icon: Clapperboard, label: "Videos" },
   ];
 
   const displayName = user?.profile?.displayName || "Furtail Member";
@@ -84,7 +86,9 @@ export function Header() {
       <nav className="hidden md:flex items-center gap-1 lg:gap-2 h-full">
         {navItems.map((item) => {
           const Icon = item.icon;
-          const isActive = pathname === item.href;
+          const isActive = item.href === "/"
+            ? pathname === "/"
+            : pathname === item.href || pathname.startsWith(item.href + "/");
           return (
             <Link
               key={item.href}

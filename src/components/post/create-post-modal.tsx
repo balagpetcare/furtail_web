@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { ChunkedUploader } from "@/lib/chunked-uploader";
 import {
   Dialog,
   DialogContent,
@@ -35,7 +36,7 @@ import {
   Hash,
   ChevronDown,
 } from "lucide-react";
-import { getMediaUrl } from "@/lib/media";
+import { getMediaUrl, generateLocalVideoThumbnail } from "@/lib/media";
 import { createPreviewUrlTracker, type PreviewUrlTracker } from "@/lib/preview-url-tracker";
 import { authKeys, authApi } from "@/lib/api/auth";
 import { postsApi, postsKeys } from "@/lib/api/posts";
@@ -113,43 +114,8 @@ const POST_TYPE_ICONS: Record<string, React.ReactNode> = {
 interface UploadedMediaResult {
   serverMediaId: number;
   serverUrl: string;
+  hlsUrl?: string | null;
   thumbnailUrl: string | null;
-}
-
-/**
- * Strict runtime parser for the upload response contract. A successful
- * upload requires BOTH a positive numeric id and a non-empty url — silently
- * accepting `url: ""` here is exactly how a server-side regression turns
- * into a client-side "gray preview box" days later, since the caller would
- * otherwise mark the item READY with nothing valid to render or submit.
- */
-function parseUploadResponse(body: unknown): UploadedMediaResult {
-  const data = (body as { data?: Record<string, unknown> } | null)?.data;
-  const id = data?.id;
-  const url = data?.url;
-  if (typeof id !== "number" || !Number.isFinite(id) || id <= 0) {
-    throw new Error("Upload response missing a valid media id");
-  }
-  if (typeof url !== "string" || url.length === 0) {
-    throw new Error("Upload response missing a valid media url");
-  }
-  const thumbnailUrl = typeof data?.thumbnailUrl === "string" ? data.thumbnailUrl : null;
-  return { serverMediaId: id, serverUrl: url, thumbnailUrl };
-}
-
-async function uploadPostMedia(file: File): Promise<UploadedMediaResult> {
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("purpose", "post");
-
-  const res = await fetch("/api/proxy/media/upload", {
-    method: "POST",
-    body: formData,
-  });
-
-  if (!res.ok) throw new Error("Failed to upload media");
-  const body = await res.json();
-  return parseUploadResponse(body);
 }
 
 function detectMediaType(
@@ -264,7 +230,15 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
         // Do NOT clear the idempotency key so retries use the same key
         // User must explicitly discard the draft to get a new key
       } else {
-        toast.error(message);
+        // The API rejects a genuinely FAILED media attachment — translate
+        // the generic "is not ready (status: FAILED)" into actionable
+        // guidance so the user retries processing or removes the video.
+        const isFailedMedia = /is not ready \(status: FAILED\)/.test(message);
+        toast.error(
+          isFailedMedia
+            ? "Video processing failed. Retry processing or remove the video."
+            : message
+        );
       }
     },
   });
@@ -286,6 +260,7 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
           previewUrl,
           type: detectMediaType(file.type),
           status: "LOCAL" as const,
+          progress: 0,
           order: draft.media.length + index,
         };
       });
@@ -305,7 +280,29 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
         };
       });
 
-      // Upload each file sequentially
+      // Generate local thumbnail for videos asynchronously
+      newItems.forEach((item, index) => {
+        if (item.type === "VIDEO") {
+          const file = fileArray[index];
+          generateLocalVideoThumbnail(file)
+            .then((thumbnailUrl) => {
+              setDraft((prev) => ({
+                ...prev,
+                media: prev.media.map((m) =>
+                  m.clientId === item.clientId
+                    ? { ...m, localThumbnailUrl: thumbnailUrl }
+                    : m
+                ),
+              }));
+            })
+            .catch((err) => {
+              console.warn("Failed to generate local video thumbnail:", err);
+            });
+        }
+      });
+
+      // Upload each file sequentially with chunked uploader
+      const uploader = new ChunkedUploader();
       for (let i = 0; i < fileArray.length; i++) {
         const file = fileArray[i];
         const localItem = newItems[i];
@@ -315,26 +312,42 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
           setDraft((prev) => ({
             ...prev,
             media: prev.media.map((m) =>
-              m.clientId === localItem.clientId ? { ...m, status: "UPLOADING" as const } : m
+              m.clientId === localItem.clientId
+                ? { ...m, status: "UPLOADING" as const, progress: 0 }
+                : m
             ),
           }));
 
-          const uploaded = await uploadPostMedia(file);
+          const uploaded = await uploader.uploadFile(file, (progress) => {
+            setDraft((prev) => ({
+              ...prev,
+              media: prev.media.map((m) =>
+                m.clientId === localItem.clientId
+                  ? { ...m, progress }
+                  : m
+              ),
+            }));
+          });
 
-          // Merge server fields only — keep previewUrl/clientId/order/type
-          // from the existing item so the composer never has to depend on
-          // the (possibly slow, possibly temporarily unreachable) server URL
-          // for rendering.
+          // After upload the server runs async processing. Videos are left
+          // PROCESSING — the pending-post flow lets the user Post before the
+          // video resolves, and the API publishes the post (from PROCESSING
+          // to ACTIVE) once the media becomes playable. Images are treated as
+          // READY immediately.
+          const postUploadStatus: "PROCESSING" | "READY" =
+            localItem.type === "VIDEO" ? "PROCESSING" : "READY";
           setDraft((prev) => ({
             ...prev,
             media: prev.media.map((m) =>
               m.clientId === localItem.clientId
                 ? {
                     ...m,
-                    serverMediaId: uploaded.serverMediaId,
-                    serverUrl: uploaded.serverUrl,
+                    serverMediaId: uploaded.id,
+                    serverUrl: uploaded.url,
+                    hlsUrl: uploaded.hlsUrl || null,
                     thumbnailUrl: uploaded.thumbnailUrl,
-                    status: "READY" as const,
+                    status: postUploadStatus,
+                    progress: 100,
                   }
                 : m
             ),
@@ -362,18 +375,62 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
   const handleRetryMedia = useCallback(
     async (clientId: number) => {
       const failedItem = draft.media.find((m) => m.clientId === clientId);
+      if (!failedItem) return;
+
+      // If the original upload already succeeded (we hold a server media id),
+      // the failure happened during PROCESSING — retry processing in place,
+      // reusing the already-uploaded original. No re-upload, no new media id.
+      if (failedItem.serverMediaId) {
+        setDraft((prev) => ({
+          ...prev,
+          media: prev.media.map((m) =>
+            m.clientId === clientId
+              ? { ...m, status: "PROCESSING" as const, error: undefined }
+              : m
+          ),
+        }));
+        try {
+          await postsApi.retryMediaProcessing(failedItem.serverMediaId);
+          toast.success("Video processing restarted");
+        } catch (error: unknown) {
+          const errorMsg = error instanceof Error ? error.message : "Failed to retry video processing";
+          setDraft((prev) => ({
+            ...prev,
+            media: prev.media.map((m) =>
+              m.clientId === clientId
+                ? { ...m, status: "FAILED" as const, error: errorMsg }
+                : m
+            ),
+          }));
+          toast.error(errorMsg);
+        }
+        return;
+      }
+
       const file = fileMapRef.current.get(clientId);
-      if (!failedItem || !file) return;
+      if (!file) return;
 
       try {
         setDraft((prev) => ({
           ...prev,
           media: prev.media.map((m) =>
-            m.clientId === clientId ? { ...m, status: "UPLOADING" as const, error: undefined } : m
+            m.clientId === clientId
+              ? { ...m, status: "UPLOADING" as const, error: undefined, progress: 0 }
+              : m
           ),
         }));
 
-        const uploaded = await uploadPostMedia(file);
+        const uploader = new ChunkedUploader();
+        const uploaded = await uploader.uploadFile(file, (progress) => {
+          setDraft((prev) => ({
+            ...prev,
+            media: prev.media.map((m) =>
+              m.clientId === clientId
+                ? { ...m, progress }
+                : m
+            ),
+          }));
+        });
 
         // Same clientId, same previewUrl, same order — only server fields
         // and status change on retry, so no duplicate tile is ever created.
@@ -383,10 +440,12 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
             m.clientId === clientId
               ? {
                   ...m,
-                  serverMediaId: uploaded.serverMediaId,
-                  serverUrl: uploaded.serverUrl,
+                  serverMediaId: uploaded.id,
+                  serverUrl: uploaded.url,
+                  hlsUrl: uploaded.hlsUrl || null,
                   thumbnailUrl: uploaded.thumbnailUrl,
                   status: "READY" as const,
+                  progress: 100,
                 }
               : m
           ),
@@ -429,7 +488,13 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
   const hasUploadingMedia = draft.media.some(
     (m) => m.status === "LOCAL" || m.status === "UPLOADING"
   );
-  const readyMediaCount = draft.media.filter((m) => m.status === "READY").length;
+  // READY/PLAYABLE attach normally; PROCESSING attaches through the
+  // pending-post flow — all three count as "content" for the Post button so a
+  // video that's still processing can be posted (the API publishes it once
+  // the video resolves).
+  const readyMediaCount = draft.media.filter(
+    (m) => m.status === "READY" || m.status === "PLAYABLE" || m.status === "PROCESSING"
+  ).length;
   const controlsDisabled = hasUploadingMedia || mutation.isPending;
   const overCaptionLimit = isOverCaptionLimit(draft.caption.length, maxCaptionCharacters);
 
@@ -464,14 +529,7 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
   return (
     <>
       <Dialog open={open} onOpenChange={(newOpen) => {
-        if (!newOpen && !isDraftEmpty) {
-          setShowDiscard(true);
-        } else if (newOpen) {
-          setShowDiscard(false);
-          onOpenChange(true);
-        } else {
-          onOpenChange(false);
-        }
+        onOpenChange(newOpen);
       }}>
         <DialogContent
           showCloseButton={false}
@@ -805,7 +863,17 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
 
               {hasUploadingMedia && (
                 <span className="text-[10px] text-gray-500 animate-pulse ml-1 flex-shrink-0">
-                  Uploading...
+                  {(() => {
+                    const uploadingMedia = draft.media.find(m => m.status === 'UPLOADING' && m.progress);
+                    if (uploadingMedia && uploadingMedia.progress) {
+                      return `Uploading ${uploadingMedia.progress}%`;
+                    }
+                    const processingMedia = draft.media.find(m => m.status === 'PROCESSING');
+                    if (processingMedia) {
+                      return 'Processing video';
+                    }
+                    return 'Uploading...';
+                  })()}
                 </span>
               )}
             </div>

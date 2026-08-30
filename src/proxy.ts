@@ -26,13 +26,18 @@ export function proxy(request: NextRequest) {
   }
 
   // 2. Application Route Guards
-  const isPublicPath = request.nextUrl.pathname === '/' || 
+  const isPublicPath = request.nextUrl.pathname === '/' ||
                        request.nextUrl.pathname.startsWith('/welcome') ||
                        request.nextUrl.pathname.startsWith('/api/auth') ||
                        request.nextUrl.pathname.startsWith('/login') ||
                        request.nextUrl.pathname.startsWith('/register') ||
                        request.nextUrl.pathname.startsWith('/_next') ||
-                       request.nextUrl.pathname === '/favicon.ico';
+                       request.nextUrl.pathname === '/favicon.ico' ||
+                       // Command 5 §10 — dev/test-only E2E preview pages. The
+                       // page itself also calls notFound() in production
+                       // (see src/app/dev/external-ad-preview/page.tsx); this
+                       // is a defense-in-depth double-gate, not the only guard.
+                       (process.env.NODE_ENV !== 'production' && request.nextUrl.pathname.startsWith('/dev/'));
 
   if (!token && !isPublicPath) {
     if (request.nextUrl.pathname === '/') {

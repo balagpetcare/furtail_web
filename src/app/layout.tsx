@@ -4,6 +4,7 @@ import "./globals.css";
 import QueryProvider from "@/providers/query-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
+import { VideoPlaybackProvider } from "@/components/video/playback-context";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = {
@@ -28,8 +29,10 @@ export default function RootLayout({
       <body className={`${inter.className} antialiased`}>
         <QueryProvider>
           <TooltipProvider>
-            {children}
-            <Toaster />
+            <VideoPlaybackProvider>
+              {children}
+              <Toaster />
+            </VideoPlaybackProvider>
           </TooltipProvider>
         </QueryProvider>
       </body>

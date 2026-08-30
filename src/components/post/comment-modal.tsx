@@ -71,6 +71,13 @@ function CommentModalBody({ postId, onOpenChange }: { postId: string; onOpenChan
   const { data: post, isLoading, error } = useQuery({
     queryKey: postsKeys.detail(postId),
     queryFn: () => postsApi.getPost(postId),
+    // Poll while any attached video is still processing so the "Processing
+    // video" placeholder upgrades to a playable player once media resolves.
+    refetchInterval: (query) => {
+      const p = query.state.data as { media?: Array<{ status?: string }> } | undefined;
+      const processing = (p?.media ?? []).some((m) => m.status === "PROCESSING");
+      return processing ? 4000 : false;
+    },
   });
 
   const { data: me } = useCurrentUserLite();
